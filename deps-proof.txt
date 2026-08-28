@@ -1,0 +1,21 @@
+ChronoReplay - Dependency Proof
+
+Python version:
+Python 3.11.9
+
+Test command:
+python -m unittest discover -s tests -v
+
+Result:
+Ran 9 tests
+OK
+
+Phase 1 imports:
+dataclasses
+datetime
+json
+uuid
+unittest
+
+All imports used by the current implementation are Python standard-library modules.
+No third-party packages are required by the project.
