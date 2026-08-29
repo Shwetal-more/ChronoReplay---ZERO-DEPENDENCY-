@@ -1,54 +1,69 @@
 """
-sqlite event store for chronoreplay.
-this module provides persistent storage for all the events.
-only python standard library are used
+SQLite event store for ChronoReplay.
+
+This module provides persistent storage for all events.
+
+Only Python standard-library modules are used.
 """
+
 import json
 import sqlite3
 
 from src.event import Event
 
+
 class EventStore:
     """
-    events are stored in a sqlite database.
-    the class provides following methods for this:
+    Events are stored in a SQLite database.
+
+    The class provides methods to:
+
     - create the database
-    - save events in it
-    - retrieve events from it
+    - save events
+    - retrieve events
     - retrieve all events
     - retrieve events by type
     - count events
-    - clear the storeage
+    - clear storage
     """
-    def __init__(self, database_path: str = "chronoreplay.db"):
+
+    def __init__(
+        self,
+        database_path: str = "chronoreplay.db"
+    ):
         """
-        create an event storage
-        parameters:
-        database_path:
-          location of sqlite database file.
+        Create an event storage.
+
+        Args:
+            database_path:
+                Location of the SQLite database file.
         """
-        #store the database path so other methods can use it.
+
         self.database_path = database_path
 
-        # create database table if it doesn't already exists.
         self._initialize_database()
 
     def _connect(self):
         """
-        create and return a sqlite database connection.
-        sqlite3 is part of python's standard library.
+        Create and return a SQLite database connection.
+
+        sqlite3 is part of Python's standard library.
         """
-        return sqlite3.connect(self.database_path)
+
+        return sqlite3.connect(
+            self.database_path
+        )
 
     def _initialize_database(self) -> None:
         """
-        create event table if it does not exists.
+        Create the events table if it does not exist.
         """
 
         connection = self._connect()
 
         try:
             cursor = connection.cursor()
+
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS events (
@@ -62,16 +77,18 @@ class EventStore:
             )
 
             connection.commit()
+
         finally:
             connection.close()
 
     def save(self, event: Event) -> None:
         """
-        save an event into database.
-        if an event with same id already exists,
-        a valueERROR is raised.
+        Save an event into the database.
+
+        If an event with the same ID already exists,
+        ValueError is raised.
         """
-        # Make sure we are storing an Event object.
+
         if not isinstance(event, Event):
             raise ValueError(
                 "Only Event objects can be stored."
@@ -83,6 +100,7 @@ class EventStore:
             cursor = connection.cursor()
 
             try:
+
                 cursor.execute(
                     """
                     INSERT INTO events
@@ -105,20 +123,36 @@ class EventStore:
                 connection.commit()
 
             except sqlite3.IntegrityError as exc:
-                # Most likely cause is a duplicate event ID.
+
                 raise ValueError(
                     f"Event with id '{event.id}' already exists."
                 ) from exc
 
         finally:
             connection.close()
+
+    def save_event(self, event: Event) -> None:
+        """
+        Compatibility wrapper for save().
+
+        Both of these are valid:
+
+            store.save(event)
+
+        and:
+
+            store.save_event(event)
+        """
+
+        self.save(event)
+
     def get(self, event_id: str):
         """
         Retrieve one event by its ID.
 
         Returns:
             Event object if found.
-            None if the event does not exist.
+            None if event does not exist.
         """
 
         connection = self._connect()
@@ -140,11 +174,17 @@ class EventStore:
         finally:
             connection.close()
 
-        # No matching event was found.
         if row is None:
             return None
 
         return self._row_to_event(row)
+
+    def get_event(self, event_id: str):
+        """
+        Compatibility wrapper for get().
+        """
+
+        return self.get(event_id)
 
     def get_all(self):
         """
@@ -176,6 +216,16 @@ class EventStore:
             for row in rows
         ]
 
+    def get_all_events(self):
+        """
+        Compatibility wrapper for get_all().
+
+        This provides the more explicit method name
+        used by some tests and application code.
+        """
+
+        return self.get_all()
+
     def get_by_type(self, event_type: str):
         """
         Retrieve all events of a specific type.
@@ -206,6 +256,15 @@ class EventStore:
             for row in rows
         ]
 
+    def get_events_by_type(self, event_type: str):
+        """
+        Compatibility wrapper for get_by_type().
+        """
+
+        return self.get_by_type(
+            event_type
+        )
+
     def count(self) -> int:
         """
         Return the total number of stored events.
@@ -231,7 +290,7 @@ class EventStore:
         """
         Delete all events from the database.
 
-        This is mainly useful for testing and development.
+        Mainly useful for testing and development.
         """
 
         connection = self._connect()
@@ -239,7 +298,9 @@ class EventStore:
         try:
             cursor = connection.cursor()
 
-            cursor.execute("DELETE FROM events")
+            cursor.execute(
+                "DELETE FROM events"
+            )
 
             connection.commit()
 
@@ -252,17 +313,17 @@ class EventStore:
 
         Database row:
 
-        (
-            id,
-            version,
-            type,
-            timestamp,
-            data_json
-        )
+            (
+                id,
+                version,
+                type,
+                timestamp,
+                data_json
+            )
 
         becomes:
 
-        Event(...)
+            Event(...)
         """
 
         event_id = row[0]
@@ -271,8 +332,9 @@ class EventStore:
         timestamp = row[3]
         data_json = row[4]
 
-        # Convert JSON string back into a Python dictionary.
-        data = json.loads(data_json)
+        data = json.loads(
+            data_json
+        )
 
         return Event(
             id=event_id,

@@ -1,8 +1,8 @@
 """
 Event validator module.
 
-This module checks whether an event follows the rules
-defined in the ChronoReplay event schema.
+This module checks whether an event follows
+the rules defined in the ChronoReplay event schema.
 
 Only Python standard-library functionality is used.
 """
@@ -15,13 +15,13 @@ class EventValidator:
     Validates ChronoReplay events.
 
     The validator checks:
+
     - whether the event type is supported
     - whether required fields are present
     - whether field values have the correct type
-    - whether values are within the expected range
+    - whether values are within expected ranges
     """
 
-    # All event types currently supported by ChronoReplay.
     supported_event_types = {
         "user.created",
         "profile.updated",
@@ -31,33 +31,31 @@ class EventValidator:
         "order.created",
         "order.updated",
         "user.deleted",
+
+        # ChronoReplay workspace events
         "file.created",
         "file.modified",
         "file.deleted",
         "file.restored",
     }
 
-    # Allowed values for status.changed.
     VALID_STATUS_VALUES = {
         "active",
         "inactive",
         "suspended",
     }
 
-    # Allowed values for payment.completed.
     VALID_PAYMENT_METHODS = {
         "UPI",
         "CARD",
         "CASH",
     }
 
-    # Allowed values for order.updated.
     VALID_ORDER_STATUSES = {
         "pending",
         "confirmed",
         "shipped",
         "completed",
-        "cancelled",
     }
 
     @classmethod
@@ -65,315 +63,480 @@ class EventValidator:
         """
         Validate an Event.
 
-        If the event is valid, this method returns None.
+        If valid:
+            returns None
 
-        If the event is invalid, ValueError is raised
-        with a message explaining the problem.
+        If invalid:
+            raises ValueError.
         """
 
-        # Make sure the supplied object is actually an Event.
         if not isinstance(event, Event):
             raise ValueError(
                 "Invalid event object. "
                 "Must be an instance of Event class."
             )
 
-        # Check whether we recognize this event type.
-        #
         # IMPORTANT:
-        # Our Event class uses the field name "type",
-        # not "event_type".
+        # Event uses .type, not .event_type.
         if event.type not in cls.supported_event_types:
             raise ValueError(
                 f"Unsupported event type: {event.type}"
             )
 
-        # Connect every event type to its validation function.
         validators = {
-            "user.created": cls._validate_user_created,
-            "profile.updated": cls._validate_profile_updated,
-            "status.changed": cls._validate_status_changed,
-            "balance.added": cls._validate_balance_added,
-            "payment.completed": cls._validate_payment_completed,
-            "order.created": cls._validate_order_created,
-            "order.updated": cls._validate_order_updated,
-            "user.deleted": cls._validate_user_deleted,
-            "file.created": cls._validate_file_created,
-            "file.modified": cls._validate_file_modified,
-            "file.deleted": cls._validate_file_deleted,
-            "file.restored": cls._validate_file_restored,
+            "user.created":
+                cls._validate_user_created,
+
+            "profile.updated":
+                cls._validate_profile_updated,
+
+            "status.changed":
+                cls._validate_status_changed,
+
+            "balance.added":
+                cls._validate_balance_added,
+
+            "payment.completed":
+                cls._validate_payment_completed,
+
+            "order.created":
+                cls._validate_order_created,
+
+            "order.updated":
+                cls._validate_order_updated,
+
+            "user.deleted":
+                cls._validate_user_deleted,
+
+            # ChronoReplay file events
+            "file.created":
+                cls._validate_file_created,
+
+            "file.modified":
+                cls._validate_file_modified,
+
+            "file.deleted":
+                cls._validate_file_deleted,
+
+            "file.restored":
+                cls._validate_file_restored,
         }
 
-        # Run the validator belonging to this event type.
-        validators[event.type](event.data)
+        validators[event.type](
+            event.data
+        )
 
     @staticmethod
-    def _require_string(data: dict, field: str) -> None:
+    def _require_string(
+        data: dict,
+        field: str
+    ) -> None:
         """
-        Make sure a field:
-        1. exists
-        2. contains a string
-        3. is not an empty string
+        Ensure a field exists and contains
+        a non-empty string.
         """
 
-        # Check whether the field exists.
         if field not in data:
             raise ValueError(
-                f"Missing required field: {field}"
+                f"missing required field: {field}"
             )
 
-        # Check whether the value is a string.
-        if not isinstance(data[field], str):
-            raise ValueError(
-                f"Field '{field}' must be a string."
-            )
-
-        # Check whether the string contains something.
-        if not data[field].strip():
-            raise ValueError(
-                f"Field '{field}' cannot be empty."
-            )
-
-    @staticmethod
-    def _require_number(data: dict, field: str) -> None:
-        """
-        Make sure a field:
-        1. exists
-        2. contains a number
-
-        bool is explicitly excluded because Python considers
-        bool to be a subclass of int.
-        """
-
-        # Check whether the field exists.
-        if field not in data:
-            raise ValueError(
-                f"Missing required field: {field}"
-            )
-
-        value = data[field]
-
-        # Accept int and float, but reject bool.
-        if isinstance(value, bool) or not isinstance(
-            value, (int, float)
+        if not isinstance(
+            data[field],
+            str
         ):
             raise ValueError(
-                f"Field '{field}' must be a number."
+                f"field {field} must be a string."
+            )
+
+        if not data[field].strip():
+            raise ValueError(
+                f"field {field} cannot be empty."
             )
 
     @staticmethod
-    def _require_integer(data: dict, field: str) -> None:
+    def _require_number(
+        data: dict,
+        field: str
+    ) -> None:
         """
-        Make sure a field:
-        1. exists
-        2. contains an integer
+        Ensure a field exists and contains
+        a number.
 
         bool is excluded because bool is technically
         a subclass of int in Python.
         """
 
-        # Check whether the field exists.
         if field not in data:
             raise ValueError(
-                f"Missing required field: {field}"
+                f"missing required field: {field}"
             )
 
         value = data[field]
 
-        # Check that the value is an integer.
-        if isinstance(value, bool) or not isinstance(value, int):
+        if (
+            isinstance(value, bool)
+            or not isinstance(
+                value,
+                (int, float)
+            )
+        ):
             raise ValueError(
-                f"Field '{field}' must be an integer."
+                f"field {field} must be a number."
+            )
+
+    @staticmethod
+    def _require_integer(
+        data: dict,
+        field: str
+    ) -> None:
+        """
+        Ensure a field exists and contains
+        an integer.
+        """
+
+        if field not in data:
+            raise ValueError(
+                f"missing required field: {field}"
+            )
+
+        value = data[field]
+
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+        ):
+            raise ValueError(
+                f"field {field} must be an integer."
             )
 
     @classmethod
-    def _validate_user_created(cls, data: dict) -> None:
+    def _validate_user_created(
+        cls,
+        data: dict
+    ) -> None:
         """
-        Validate a user.created event.
+        Validate user.created.
 
-        Required fields:
-        - user_id -> string
-        - name    -> string
-        - email   -> string
-        - age     -> integer
+        Required:
+            user_id -> string
+            name    -> string
+            email   -> string
+            age     -> integer
         """
 
-        cls._require_string(data, "user_id")
-        cls._require_string(data, "name")
-        cls._require_string(data, "email")
-        cls._require_integer(data, "age")
+        cls._require_string(
+            data,
+            "user_id"
+        )
 
-        # Age cannot be negative.
+        cls._require_string(
+            data,
+            "name"
+        )
+
+        cls._require_string(
+            data,
+            "email"
+        )
+
+        cls._require_integer(
+            data,
+            "age"
+        )
+
         if data["age"] < 0:
             raise ValueError(
-                "Field 'age' must be a non-negative integer."
+                "field age must be a non-negative integer."
             )
 
     @classmethod
-    def _validate_profile_updated(cls, data: dict) -> None:
+    def _validate_profile_updated(
+        cls,
+        data: dict
+    ) -> None:
         """
-        Validate a profile.updated event.
+        Validate profile.updated.
 
-        Required fields:
-        - user_id -> string
-        - name    -> string
-        - city    -> string
+        Required:
+            user_id -> string
+            name    -> string
+            city    -> string
         """
 
-        cls._require_string(data, "user_id")
-        cls._require_string(data, "name")
-        cls._require_string(data, "city")
+        cls._require_string(
+            data,
+            "user_id"
+        )
+
+        cls._require_string(
+            data,
+            "name"
+        )
+
+        cls._require_string(
+            data,
+            "city"
+        )
 
     @classmethod
-    def _validate_status_changed(cls, data: dict) -> None:
+    def _validate_status_changed(
+        cls,
+        data: dict
+    ) -> None:
         """
-        Validate a status.changed event.
-
-        Required fields:
-        - user_id -> string
-        - status  -> one of the allowed status values
+        Validate status.changed.
         """
 
-        cls._require_string(data, "user_id")
-        cls._require_string(data, "status")
+        cls._require_string(
+            data,
+            "user_id"
+        )
 
-        # Check whether the status is allowed.
+        cls._require_string(
+            data,
+            "status"
+        )
+
         if data["status"] not in cls.VALID_STATUS_VALUES:
             raise ValueError(
-                f"Invalid status value: {data['status']}. "
-                f"Must be one of {sorted(cls.VALID_STATUS_VALUES)}"
+                f"Invalid status value: "
+                f"{data['status']}. "
+                f"Must be one of "
+                f"{cls.VALID_STATUS_VALUES}"
             )
 
     @classmethod
-    def _validate_balance_added(cls, data: dict) -> None:
+    def _validate_balance_added(
+        cls,
+        data: dict
+    ) -> None:
         """
-        Validate a balance.added event.
-
-        Required fields:
-        - user_id -> string
-        - amount  -> positive number
+        Validate balance.added.
         """
 
-        cls._require_string(data, "user_id")
-        cls._require_number(data, "amount")
+        cls._require_string(
+            data,
+            "user_id"
+        )
 
-        # Balance addition must be greater than zero.
+        cls._require_number(
+            data,
+            "amount"
+        )
+
         if data["amount"] <= 0:
             raise ValueError(
-                "Balance amount must be greater than zero."
+                "Balance amount must be greater than zero"
             )
 
     @classmethod
-    def _validate_payment_completed(cls, data: dict) -> None:
+    def _validate_payment_completed(
+        cls,
+        data: dict
+    ) -> None:
         """
-        Validate a payment.completed event.
-
-        Required fields:
-        - user_id -> string
-        - amount  -> positive number
-        - method  -> UPI, CARD, or CASH
+        Validate payment.completed.
         """
 
-        cls._require_string(data, "user_id")
-        cls._require_number(data, "amount")
-        cls._require_string(data, "method")
+        cls._require_string(
+            data,
+            "user_id"
+        )
 
-        # Payment amount must be positive.
+        cls._require_number(
+            data,
+            "amount"
+        )
+
+        cls._require_string(
+            data,
+            "method"
+        )
+
         if data["amount"] <= 0:
             raise ValueError(
-                "Payment amount must be greater than zero."
+                "Payment amount must be greater than zero"
             )
 
-        # Payment method must be one of our supported methods.
         if data["method"] not in cls.VALID_PAYMENT_METHODS:
             raise ValueError(
-                f"Invalid payment method: {data['method']}. "
-                f"Must be one of "
-                f"{sorted(cls.VALID_PAYMENT_METHODS)}"
+                f"Invalid payment method: "
+                f"{data['method']}"
             )
 
     @classmethod
-    def _validate_order_created(cls, data: dict) -> None:
+    def _validate_order_created(
+        cls,
+        data: dict
+    ) -> None:
         """
-        Validate an order.created event.
-
-        Required fields:
-        - order_id -> string
-        - user_id  -> string
-        - amount   -> positive number
+        Validate order.created.
         """
 
-        cls._require_string(data, "order_id")
-        cls._require_string(data, "user_id")
-        cls._require_number(data, "amount")
+        cls._require_string(
+            data,
+            "order_id"
+        )
 
-        # Order amount must be positive.
+        cls._require_string(
+            data,
+            "user_id"
+        )
+
+        cls._require_number(
+            data,
+            "amount"
+        )
+
         if data["amount"] <= 0:
             raise ValueError(
-                "Order amount must be greater than zero."
+                "Order amount must be greater than zero"
             )
 
     @classmethod
-    def _validate_order_updated(cls, data: dict) -> None:
+    def _validate_order_updated(
+        cls,
+        data: dict
+    ) -> None:
         """
-        Validate an order.updated event.
-
-        Required fields:
-        - order_id -> string
-        - status   -> one of the allowed order statuses
+        Validate order.updated.
         """
 
-        cls._require_string(data, "order_id")
-        cls._require_string(data, "status")
+        cls._require_string(
+            data,
+            "order_id"
+        )
 
-        # Check whether the order status is supported.
+        cls._require_string(
+            data,
+            "status"
+        )
+
         if data["status"] not in cls.VALID_ORDER_STATUSES:
             raise ValueError(
-                f"Invalid order status: {data['status']}. "
-                f"Must be one of "
-                f"{sorted(cls.VALID_ORDER_STATUSES)}"
+                f"Invalid order status: "
+                f"{data['status']}"
             )
 
     @classmethod
-    def _validate_user_deleted(cls, data: dict) -> None:
+    def _validate_user_deleted(
+        cls,
+        data: dict
+    ) -> None:
         """
-        Validate a user.deleted event.
-
-        Required fields:
-        - user_id -> string
+        Validate user.deleted.
         """
 
-        cls._require_string(data, "user_id")
+        cls._require_string(
+            data,
+            "user_id"
+        )
+
+    # =========================================================
+    # CHRONOREPLAY FILE EVENTS
+    # =========================================================
 
     @classmethod
-    def _validate_file_created(cls, data: dict) -> None:
-        """Validate file.created."""
+    def _validate_file_created(
+        cls,
+        data: dict
+    ) -> None:
+        """
+        Validate file.created.
 
-        cls._require_string(data, "file_path")
-        cls._require_string(data, "snapshot_id")
-        cls._require_string(data, "content_hash")
+        Required:
+            file_path
+            snapshot_id
+            content_hash
+        """
 
+        cls._require_string(
+            data,
+            "file_path"
+        )
+
+        cls._require_string(
+            data,
+            "snapshot_id"
+        )
+
+        cls._require_string(
+            data,
+            "content_hash"
+        )
 
     @classmethod
-    def _validate_file_modified(cls, data: dict) -> None:
-        """Validate file.modified."""
+    def _validate_file_modified(
+        cls,
+        data: dict
+    ) -> None:
+        """
+        Validate file.modified.
 
-        cls._require_string(data, "file_path")
-        cls._require_string(data, "snapshot_id")
-        cls._require_string(data, "content_hash")
+        Required:
+            file_path
+            snapshot_id
+            content_hash
+        """
 
+        cls._require_string(
+            data,
+            "file_path"
+        )
+
+        cls._require_string(
+            data,
+            "snapshot_id"
+        )
+
+        cls._require_string(
+            data,
+            "content_hash"
+        )
 
     @classmethod
-    def _validate_file_deleted(cls, data: dict) -> None:
-        """Validate file.deleted."""
+    def _validate_file_deleted(
+        cls,
+        data: dict
+    ) -> None:
+        """
+        Validate file.deleted.
 
-        cls._require_string(data, "file_path")
+        Required:
+            file_path
+        """
 
+        cls._require_string(
+            data,
+            "file_path"
+        )
 
     @classmethod
-    def _validate_file_restored(cls, data: dict) -> None:
-        """Validate file.restored."""
+    def _validate_file_restored(
+        cls,
+        data: dict
+    ) -> None:
+        """
+        Validate file.restored.
 
-        cls._require_string(data, "file_path")
-        cls._require_string(data, "snapshot_id")
-        cls._require_string(data, "content_hash")
+        Required:
+            file_path
+            snapshot_id
+            content_hash
+        """
+
+        cls._require_string(
+            data,
+            "file_path"
+        )
+
+        cls._require_string(
+            data,
+            "snapshot_id"
+        )
+
+        cls._require_string(
+            data,
+            "content_hash"
+        )
