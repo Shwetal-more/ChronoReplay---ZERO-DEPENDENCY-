@@ -31,6 +31,10 @@ class EventValidator:
         "order.created",
         "order.updated",
         "user.deleted",
+        "file.created",
+        "file.modified",
+        "file.deleted",
+        "file.restored",
     }
 
     # Allowed values for status.changed.
@@ -94,6 +98,10 @@ class EventValidator:
             "order.created": cls._validate_order_created,
             "order.updated": cls._validate_order_updated,
             "user.deleted": cls._validate_user_deleted,
+            "file.created": cls._validate_file_created,
+            "file.modified": cls._validate_file_modified,
+            "file.deleted": cls._validate_file_deleted,
+            "file.restored": cls._validate_file_restored,
         }
 
         # Run the validator belonging to this event type.
@@ -336,3 +344,36 @@ class EventValidator:
         """
 
         cls._require_string(data, "user_id")
+
+    @classmethod
+    def _validate_file_created(cls, data: dict) -> None:
+        """Validate file.created."""
+
+        cls._require_string(data, "file_path")
+        cls._require_string(data, "snapshot_id")
+        cls._require_string(data, "content_hash")
+
+
+    @classmethod
+    def _validate_file_modified(cls, data: dict) -> None:
+        """Validate file.modified."""
+
+        cls._require_string(data, "file_path")
+        cls._require_string(data, "snapshot_id")
+        cls._require_string(data, "content_hash")
+
+
+    @classmethod
+    def _validate_file_deleted(cls, data: dict) -> None:
+        """Validate file.deleted."""
+
+        cls._require_string(data, "file_path")
+
+
+    @classmethod
+    def _validate_file_restored(cls, data: dict) -> None:
+        """Validate file.restored."""
+
+        cls._require_string(data, "file_path")
+        cls._require_string(data, "snapshot_id")
+        cls._require_string(data, "content_hash")
