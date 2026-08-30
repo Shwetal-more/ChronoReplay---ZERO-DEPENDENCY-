@@ -125,9 +125,7 @@ class Event:
             id=cls.generate_event_id(),
             version=1,
             type=event_type,
-            timestamp=datetime.now(
-                timezone.utc
-            ).isoformat(),
+            timestamp=datetime.now().astimezone().isoformat(),
             data=data,
         )
 

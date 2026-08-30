@@ -119,3 +119,43 @@ class ChronoReplay:
         """
 
         self.relay.unsubscribe(callback)
+
+    def rewind(self, event_number: int) -> dict:
+        """
+        Non-destructively inspect application state at an earlier point in time.
+
+        Rewinds the replayed state view to `event_number` without deleting or
+        modifying any subsequent events in the EventStore.
+
+        Parameters:
+            event_number: The 1-based event number to inspect up to.
+
+        Returns:
+            dict: The reconstructed application state as of event_number.
+        """
+        from src.replay import ReplayEngine
+        replayer = ReplayEngine(self.store)
+        return replayer.replay_until(event_number)
+
+    def restore_state(self, source_event_number: int, reason: str = None) -> Event:
+        """
+        Append-only state restoration.
+
+        Takes historical state from `source_event_number` and makes it the active
+        production state by appending a new 'state.restored' event to the ledger.
+        Zero past events are erased or overwritten.
+
+        Parameters:
+            source_event_number: The 1-based event number whose state is restored.
+            reason: Optional explanation string for the restoration audit trail.
+
+        Returns:
+            Event: The newly created and stored 'state.restored' event.
+        """
+        data = {
+            "source_event_number": source_event_number
+        }
+        if reason:
+            data["reason"] = str(reason)
+
+        return self.publish_event("state.restored", data)

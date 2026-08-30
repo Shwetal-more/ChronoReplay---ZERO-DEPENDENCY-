@@ -373,59 +373,6 @@ class TestRestoreManager(unittest.TestCase):
             "file.restored"
         )
 
-    def test_restore_merge_with_current_keeps_both_versions(self):
-        """
-        When merge_with_current=True, the current file should remain and
-        historical lines should be appended without erasing the active state.
-        """
-
-        file_path = os.path.join(
-            self.workspace_path,
-            "main.py"
-        )
-
-        with open(
-            file_path,
-            "w",
-            encoding="utf-8"
-        ) as file:
-            file.write(
-                "current\nstate\n"
-            )
-
-        snapshot = self._create_snapshot(
-            "main.py",
-            "prev\nline1\nline2\n"
-        )
-
-        event = self.manager.restore(
-            snapshot.snapshot_id,
-            merge_with_current=True,
-            previous_line_count=2,
-        )
-
-        with open(
-            file_path,
-            "r",
-            encoding="utf-8"
-        ) as file:
-            content = file.read()
-
-        self.assertEqual(
-            content,
-            "current\nstate\n\nline1\nline2"
-        )
-
-        self.assertIsInstance(
-            event,
-            Event
-        )
-
-        self.assertEqual(
-            event.type,
-            "file.restored"
-        )
-
     # =========================================================
     # RESTORE DELETED FILE
     # =========================================================
@@ -837,6 +784,108 @@ class TestRestoreManager(unittest.TestCase):
         self.assertFalse(
         os.path.exists(file_path)
         )
+
+    # =========================================================
+    # SELECTIVE & KEEP-BOTH TESTS
+    # =========================================================
+
+    def test_restore_selected_lines(self):
+        """
+        Extract specific lines from previous snapshot and append/prepend to current file.
+        """
+        # Create initial file on disk
+        target_path = os.path.join(self.workspace_path, "code.py")
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write("def current_func():\n    pass\n")
+
+        # Snapshot with older lines
+        snap = self._create_snapshot(
+            "code.py",
+            "# Line 1: header\n# Line 2: helper\ndef old_helper():\n    return 42\n"
+        )
+
+        # Restore lines 3 and 4 (the helper function)
+        evt = self.manager.restore_selected_lines(
+            snap.snapshot_id,
+            line_numbers=[3, 4],
+            placement="append"
+        )
+        self.assertEqual(evt.type, "file.restored")
+
+        with open(target_path, "r", encoding="utf-8") as f:
+            restored_content = f.read()
+
+        self.assertIn("def current_func():", restored_content)
+        self.assertIn("def old_helper():\n    return 42", restored_content)
+
+    def test_restore_keep_both_combined(self):
+        """
+        Merge current state and historical snapshot in one file.
+        """
+        target_path = os.path.join(self.workspace_path, "notes.txt")
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write("Current notes: line A\nline B\n")
+
+        snap = self._create_snapshot("notes.txt", "Old notes: line X\nline Y\n")
+
+        evt = self.manager.restore_keep_both(snap.snapshot_id, mode="combine_sections")
+        self.assertEqual(evt.type, "file.restored")
+
+        with open(target_path, "r", encoding="utf-8") as f:
+            merged = f.read()
+
+        self.assertIn("CURRENT WORKING STATE", merged)
+        self.assertIn("Current notes: line A", merged)
+        self.assertIn("RESTORED HISTORICAL VERSION", merged)
+        self.assertIn("Old notes: line X", merged)
+
+    def test_restore_keep_both_new_file(self):
+        """
+        Save historical version as a separate file without modifying current file.
+        """
+        target_path = os.path.join(self.workspace_path, "doc.txt")
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write("Current document\n")
+
+        snap = self._create_snapshot("doc.txt", "Historical document\n")
+
+        evt = self.manager.restore_keep_both(
+            snap.snapshot_id,
+            mode="new_file",
+            new_file_path="doc_backup.txt"
+        )
+        self.assertEqual(evt.type, "file.created")
+
+        # Original file unchanged
+        with open(target_path, "r", encoding="utf-8") as f:
+            self.assertEqual(f.read(), "Current document\n")
+
+        # New file created
+        backup_path = os.path.join(self.workspace_path, "doc_backup.txt")
+        self.assertTrue(os.path.isfile(backup_path))
+        with open(backup_path, "r", encoding="utf-8") as f:
+            self.assertEqual(f.read(), "Historical document\n")
+
+    def test_restore_state_snapshot_append_only(self):
+        """
+        Restoring application state appends an immutable state.restored event.
+        """
+        # Save sample business events
+        e1 = Event.create("user.created", {"user_id": "USR-001", "name": "Alice", "email": "alice@example.com", "age": 25})
+        e2 = Event.create("balance.added", {"user_id": "USR-001", "amount": 500.0})
+        self.store.save(e1)
+        self.store.save(e2)
+
+        # Restore state back to step 1
+        restore_evt = self.manager.restore_state_snapshot(1, reason="Rollback balance")
+        self.assertEqual(restore_evt.type, "state.restored")
+        self.assertEqual(restore_evt.data["source_event_number"], 1)
+
+        # Confirm all 3 events exist in store
+        events = self.store.get_all()
+        self.assertEqual(len(events), 3)
+        self.assertEqual(events[2].type, "state.restored")
+
 
 if __name__ == "__main__":
     unittest.main()

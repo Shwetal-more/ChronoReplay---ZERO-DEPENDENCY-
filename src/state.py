@@ -20,6 +20,7 @@ class StateEngine:
             "files": {},
         }
         self._snapshots = []
+        self._event_id_to_snapshot = {}
         self._diagnostics = []
         self._event_count = 0
 
@@ -84,7 +85,10 @@ class StateEngine:
             )
 
         self._event_count += 1
-        self._snapshots.append(deepcopy(self.state))
+        current_snapshot = deepcopy(self.state)
+        self._snapshots.append(current_snapshot)
+        if hasattr(event, "id") and event.id:
+            self._event_id_to_snapshot[event.id] = current_snapshot
 
     # =========================================================
     # USER CREATED
@@ -290,18 +294,25 @@ class StateEngine:
         }
 
     def _apply_state_restored(self, data: dict) -> None:
-        source_event_number = data["source_event_number"]
+        source_event_id = data.get("source_event_id")
+        if source_event_id and source_event_id in self._event_id_to_snapshot:
+            self.state = deepcopy(self._event_id_to_snapshot[source_event_id])
+            return
 
-        if not isinstance(source_event_number, int):
-            raise ValueError("source_event_number must be an integer.")
+        source_event_number = data.get("source_event_number")
+        if source_event_number is not None:
+            if not isinstance(source_event_number, int):
+                raise ValueError("source_event_number must be an integer.")
 
-        if source_event_number < 1:
-            raise ValueError("source_event_number must be at least 1.")
+            if source_event_number < 1:
+                raise ValueError("source_event_number must be at least 1.")
 
-        if source_event_number > len(self._snapshots):
-            raise ValueError("Cannot restore to a future or unavailable event.")
+            if source_event_number > len(self._snapshots):
+                raise ValueError("Cannot restore to a future or unavailable event.")
 
-        self.state = deepcopy(self._snapshots[source_event_number - 1])
+            self.state = deepcopy(self._snapshots[source_event_number - 1])
+        else:
+            raise ValueError("source_event_id or source_event_number required.")
 
     # =========================================================
     # HELPERS

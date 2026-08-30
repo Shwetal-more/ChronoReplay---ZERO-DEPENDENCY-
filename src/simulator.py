@@ -52,6 +52,7 @@ class EventSimulator:
                     "user_id": u["user_id"],
                     "name": u.get("name") or self.current_user_name or "Unknown",
                     "email": u.get("email") or self.current_user_email or "",
+                    "balance": u.get("balance", 0.0),
                 }
         active_users = [u for u in self.get_all_users() if u.get("status") != "deleted"]
         if active_users:
@@ -62,6 +63,7 @@ class EventSimulator:
                 "user_id": self.current_user_id,
                 "name": self.current_user_name or "Unknown",
                 "email": self.current_user_email or "",
+                "balance": active_users[0].get("balance", 0.0),
             }
         self.current_user_id = None
         self.current_user_name = None
@@ -132,7 +134,7 @@ class EventSimulator:
     # =========================================================
 
     def get_all_users(self):
-        """Reconstruct and return list of all users from the store."""
+        """Reconstruct and return list of all users from the store with active balance."""
         users = {}
         for event in self.store.get_all():
             if event.type == "user.created" and "user_id" in event.data:
@@ -143,6 +145,7 @@ class EventSimulator:
                     "email": event.data.get("email", ""),
                     "age": event.data.get("age", 0),
                     "status": "active",
+                    "balance": 0.0,
                 }
             elif event.type == "profile.updated" and "user_id" in event.data:
                 uid = event.data["user_id"]
@@ -152,6 +155,16 @@ class EventSimulator:
                 uid = event.data["user_id"]
                 if uid in users:
                     users[uid]["status"] = event.data.get("status", users[uid]["status"])
+            elif event.type == "balance.added" and "user_id" in event.data:
+                uid = event.data["user_id"]
+                if uid in users:
+                    users[uid]["balance"] += float(event.data.get("amount", 0.0))
+            elif event.type == "payment.completed" and "user_id" in event.data:
+                uid = event.data["user_id"]
+                if uid in users:
+                    amt = float(event.data.get("amount", 0.0))
+                    if users[uid]["balance"] >= amt:
+                        users[uid]["balance"] -= amt
             elif event.type == "user.deleted" and "user_id" in event.data:
                 uid = event.data["user_id"]
                 if uid in users:

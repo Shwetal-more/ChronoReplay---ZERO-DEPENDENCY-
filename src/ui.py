@@ -15,6 +15,7 @@ Only Python standard-library modules are used.
 
 import os
 import difflib
+from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from copy import deepcopy
@@ -758,7 +759,7 @@ class ChronoReplayUI:
 
         if event_type == "payment.completed":
             user_orders = self.simulator.get_user_orders(current_user["user_id"])
-            user_balance = current_user.get("balance", 0.0)
+            user_balance = self.simulator.get_user_balance(current_user["user_id"])
             if not user_orders:
                 no_order_card = self.make_card(
                     form_frame, bg=self.INPUT_COLOR, highlightbackground=self.WARNING_COLOR
@@ -806,7 +807,7 @@ class ChronoReplayUI:
 
                 self.make_label(
                     inner,
-                    text="⚠  NO BALANCE AVAILABLE (Current: ₹0.00)",
+                    text=f"⚠  NO BALANCE AVAILABLE (Current: ₹{user_balance:.2f})",
                     bg=self.INPUT_COLOR,
                     fg=self.WARNING_COLOR,
                     size=10,
@@ -911,6 +912,34 @@ class ChronoReplayUI:
     # Form submission handlers
     # ---------------------------------------------------------
 
+    def _get_event_local_date(self, event):
+        """Extract standardized YYYY-MM-DD local date string from event timestamp."""
+        ts = getattr(event, "timestamp", "")
+        if not ts:
+            return ""
+        try:
+            dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is not None:
+                return dt.astimezone().strftime("%Y-%m-%d")
+            return dt.strftime("%Y-%m-%d")
+        except Exception:
+            return ts.split("T")[0].split(" ")[0]
+
+    def _get_event_local_time(self, event):
+        """Extract standardized HH:MM:SS local time string from event timestamp."""
+        ts = getattr(event, "timestamp", "")
+        if not ts:
+            return ""
+        try:
+            dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is not None:
+                return dt.astimezone().strftime("%H:%M:%S")
+            return dt.strftime("%H:%M:%S")
+        except Exception:
+            if "T" in ts:
+                return ts.split("T")[1].split(".")[0].split("+")[0]
+            return ts
+
     def _handle_create_user_submit(self):
         try:
             name = self.field_vars["name"][0].get().strip()
@@ -919,6 +948,8 @@ class ChronoReplayUI:
             if not name or not email or not age_str:
                 raise ValueError("Name, email, and age are required.")
             event = self.simulator.create_user(name, email, int(age_str))
+            self.history_user_filter_var.set("ALL")
+            self.history_date_filter_var.set("ALL")
             self._show_status(f"User created successfully — User ID: {event.data['user_id']}", success=True)
             self.show_dashboard()
         except Exception as exc:
@@ -928,6 +959,7 @@ class ChronoReplayUI:
         try:
             amount = float(self.field_vars["amount"][0].get().strip())
             event = self.simulator.add_balance(amount)
+            self.history_date_filter_var.set("ALL")
             self._show_status(
                 f"Balance added: ₹{amount:.2f} for user {event.data['user_id']}", success=True
             )
@@ -939,6 +971,7 @@ class ChronoReplayUI:
         try:
             amount = float(self.field_vars["amount"][0].get().strip())
             event = self.simulator.create_order(amount)
+            self.history_date_filter_var.set("ALL")
             self._show_status(
                 f"Order created successfully — Order ID: {event.data['order_id']} (₹{amount:.2f})",
                 success=True,
@@ -960,6 +993,7 @@ class ChronoReplayUI:
                     order_id = raw_order
 
             self.simulator.complete_payment(amount, method, order_id=order_id)
+            self.history_date_filter_var.set("ALL")
 
             diag = self.replay_engine.get_diagnostics_for_event(len(self.store.get_all()))
             if not diag.get("is_valid", True):
@@ -1073,7 +1107,7 @@ class ChronoReplayUI:
             row = self.make_card(preview_table, bg=self.INPUT_COLOR)
             row.pack(fill="x", pady=2)
 
-            ts = event.timestamp.split("T")[1].split(".")[0] if "T" in event.timestamp else event.timestamp
+            ts = self._get_event_local_time(event)
             user_badge = event.data.get("user_id", "System")
             if "name" in event.data and event.type == "user.created":
                 user_badge = f"{user_badge} ({event.data['name']})"
@@ -1264,8 +1298,12 @@ class ChronoReplayUI:
         ]
         date_counts = {}
         for e in events_for_user:
-            d_str = e.timestamp.split("T")[0].split(" ")[0]
+            d_str = self._get_event_local_date(e)
             date_counts[d_str] = date_counts.get(d_str, 0) + 1
+
+        if active_date != "ALL" and active_date not in date_counts:
+            active_date = "ALL"
+            self.history_date_filter_var.set("ALL")
 
         date_btn_specs = [(f"ALL DATES ({len(events_for_user)})", "ALL")] + [
             (f"📅 {d} ({date_counts[d]})", d) for d in sorted(date_counts.keys(), reverse=True)
@@ -1404,7 +1442,7 @@ class ChronoReplayUI:
                 or (active_user == "EX_USERS" and e.data.get("user_id") in ex_uids)
                 or e.data.get("user_id") == active_user
             )
-            and (active_date == "ALL" or e.timestamp.split("T")[0].split(" ")[0] == active_date)
+            and (active_date == "ALL" or self._get_event_local_date(e) == active_date)
         ]
 
         if not displayed_events:
@@ -1421,7 +1459,7 @@ class ChronoReplayUI:
             row = self.make_card(card, bg=row_bg, highlightbackground=row_border)
             row.pack(fill="x", padx=20, pady=3)
 
-            ts = event.timestamp.split("T")[1].split("+")[0] if "T" in event.timestamp else event.timestamp
+            ts = self._get_event_local_time(event)
             raw_uid = event.data.get("user_id", "System")
             is_ex = raw_uid in ex_uids
             ex_obj = next((u for u in ex_users if u["user_id"] == raw_uid), None)
@@ -1479,6 +1517,7 @@ class ChronoReplayUI:
 
     def _set_user_filter(self, user_filter):
         self.history_user_filter_var.set(user_filter)
+        self.history_date_filter_var.set("ALL")
         self.show_event_history()
 
     def _set_date_filter(self, date_filter):
@@ -2049,23 +2088,37 @@ class ChronoReplayUI:
             f"No events will be deleted. All previous events remain safely stored in the Event Store.",
         )
         if confirm:
-            restored_event = Event(
-                type="state.restored",
+            all_store_events = self.store.get_all()
+            exact_store_index = next(
+                (i for i, e in enumerate(all_store_events, 1) if e.id == target_event.id),
+                abs_step_number or 1,
+            )
+
+            target_uid = target_event.data.get("user_id", "System")
+            restored_event = Event.create(
+                event_type="state.restored",
                 data={
-                    "source_event_number": abs_step_number or 1,
+                    "source_event_number": exact_store_index,
                     "source_event_id": target_event.id,
                     "source_event_type": target_event.type,
-                    "user_id": target_event.data.get("user_id", "System"),
+                    "user_id": target_uid,
                 },
             )
             self.store.append(restored_event)
 
             state = self.replay_engine.replay_all()
             users = state.get("users", {})
-            if users:
+            if target_uid in users:
+                u = users[target_uid]
+                self.simulator.select_user(target_uid, u.get("name"), u.get("email"))
+                self.history_user_filter_var.set(target_uid)
+            elif users:
                 last_user_id = list(users.keys())[-1]
                 last_user = users[last_user_id]
                 self.simulator.select_user(last_user_id, last_user.get("name"), last_user.get("email"))
+                self.history_user_filter_var.set(last_user_id)
+
+            self.history_date_filter_var.set("ALL")
 
             messagebox.showinfo(
                 "State Restored (Append-Only)",

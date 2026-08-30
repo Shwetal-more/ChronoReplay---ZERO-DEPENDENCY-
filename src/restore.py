@@ -512,3 +512,219 @@ class RestoreManager:
         return len(
             self.get_versions(file_path)
         )
+
+    # ---------------------------------------------------------
+    # PARTIAL & NON-DESTRUCTIVE RESTORATION HELPERS
+    # ---------------------------------------------------------
+
+    def restore_selected_lines(
+        self,
+        snapshot_id: str,
+        line_numbers: list,
+        placement: str = "append",
+        user_id: str = None
+    ) -> Event:
+        """
+        Extract specific 1-based line numbers from a snapshot and merge them
+        into the active workspace file without overwriting existing content.
+        """
+        snapshot = self.get_version(snapshot_id)
+        if snapshot is None:
+            raise ValueError(f"Snapshot '{snapshot_id}' was not found.")
+
+        if not snapshot.verify_integrity():
+            raise ValueError(f"Snapshot '{snapshot_id}' failed integrity verification.")
+
+        full_path = self._validate_relative_path(snapshot.file_path)
+        snapshot_lines = snapshot.content.splitlines()
+
+        extracted_lines = []
+        for line_no in line_numbers:
+            if 1 <= line_no <= len(snapshot_lines):
+                extracted_lines.append(snapshot_lines[line_no - 1])
+
+        extracted_text = "\n".join(extracted_lines)
+        current_text = ""
+        if os.path.exists(full_path):
+            with open(full_path, "r", encoding="utf-8", newline="") as f:
+                current_text = f.read()
+
+        if placement == "prepend":
+            new_content = extracted_text + ("\n" if extracted_text else "") + current_text
+        else:  # append
+            sep = "\n" if (current_text and not current_text.endswith("\n")) else ""
+            new_content = current_text + (sep if current_text else "") + extracted_text
+            if not new_content.endswith("\n"):
+                new_content += "\n"
+
+        parent_dir = os.path.dirname(full_path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
+
+        with open(full_path, "w", encoding="utf-8", newline="") as f:
+            f.write(new_content)
+
+        event_data = {
+            "file_path": snapshot.file_path,
+            "snapshot_id": snapshot.snapshot_id,
+            "content_hash": snapshot.content_hash,
+            "restored_lines": list(line_numbers),
+            "placement": placement,
+        }
+        if user_id:
+            event_data["user_id"] = user_id
+
+        event = Event.create("file.restored", event_data)
+        EventValidator.validate(event)
+        self.store.save(event)
+        return event
+
+    def restore_keep_both(
+        self,
+        snapshot_id: str,
+        mode: str = "combine_sections",
+        new_file_path: str = None,
+        user_id: str = None
+    ) -> Event:
+        """
+        Non-destructively preserve both active workspace state and historical snapshot.
+
+        Modes:
+            - 'combine_sections': Appends historical version in a clearly delineated section.
+            - 'new_file': Writes historical version into a separate backup file path.
+        """
+        snapshot = self.get_version(snapshot_id)
+        if snapshot is None:
+            raise ValueError(f"Snapshot '{snapshot_id}' was not found.")
+
+        if not snapshot.verify_integrity():
+            raise ValueError(f"Snapshot '{snapshot_id}' failed integrity verification.")
+
+        if mode == "new_file":
+            target_rel_path = new_file_path or f"{snapshot.file_path}.restored"
+            target_full_path = self._validate_relative_path(target_rel_path)
+
+            parent_dir = os.path.dirname(target_full_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
+
+            with open(target_full_path, "w", encoding="utf-8", newline="") as f:
+                f.write(snapshot.content)
+
+            # Generate and save snapshot for the new file
+            new_snap = Snapshot.create(
+                snapshot_id=os.urandom(16).hex(),
+                file_path=target_rel_path,
+                content=snapshot.content
+            )
+            self.store.save_snapshot(new_snap)
+
+            event_data = {
+                "file_path": target_rel_path,
+                "snapshot_id": new_snap.snapshot_id,
+                "content_hash": new_snap.content_hash,
+            }
+            if user_id:
+                event_data["user_id"] = user_id
+
+            event = Event.create("file.created", event_data)
+            EventValidator.validate(event)
+            self.store.save(event)
+            return event
+
+        else:  # combine_sections
+            full_path = self._validate_relative_path(snapshot.file_path)
+            current_text = ""
+            if os.path.exists(full_path):
+                with open(full_path, "r", encoding="utf-8", newline="") as f:
+                    current_text = f.read()
+
+            combined = (
+                "// ==========================================\n"
+                "// CURRENT WORKING STATE\n"
+                "// ==========================================\n"
+                f"{current_text.rstrip()}\n\n"
+                "// ==========================================\n"
+                "// RESTORED HISTORICAL VERSION\n"
+                "// ==========================================\n"
+                f"{snapshot.content}\n"
+            )
+
+            parent_dir = os.path.dirname(full_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
+
+            with open(full_path, "w", encoding="utf-8", newline="") as f:
+                f.write(combined)
+
+            event_data = {
+                "file_path": snapshot.file_path,
+                "snapshot_id": snapshot.snapshot_id,
+                "content_hash": snapshot.content_hash,
+                "mode": "combine_sections",
+            }
+            if user_id:
+                event_data["user_id"] = user_id
+
+            event = Event.create("file.restored", event_data)
+            EventValidator.validate(event)
+            self.store.save(event)
+            return event
+
+    # ---------------------------------------------------------
+    # APPLICATION STATE RESTORATION (APPEND-ONLY)
+    # ---------------------------------------------------------
+
+
+    def restore_state_snapshot(
+        self,
+        source_event_number: int,
+        reason: str = None
+    ) -> Event:
+        """
+        Create and append a 'state.restored' event targeting an earlier state snapshot.
+
+        This sets the application's head state back to the specified event number
+        while strictly preserving all intervening historical events in the ledger.
+
+        Args:
+            source_event_number: One-based event index to restore from.
+            reason: Optional explanation string for audit trail.
+
+        Returns:
+            The newly created and persisted file/state restoration Event.
+        """
+        if (
+            isinstance(source_event_number, bool)
+            or not isinstance(source_event_number, int)
+        ):
+            raise ValueError(
+                "source_event_number must be an integer."
+            )
+
+        if source_event_number < 1:
+            raise ValueError(
+                "source_event_number must be at least 1."
+            )
+
+        total_events = self.store.count()
+        if source_event_number > total_events:
+            raise ValueError(
+                f"Cannot restore to event #{source_event_number}; only {total_events} events exist."
+            )
+
+        data = {
+            "source_event_number": source_event_number
+        }
+        if reason:
+            data["reason"] = str(reason)
+
+        event = Event.create(
+            "state.restored",
+            data
+        )
+
+        EventValidator.validate(event)
+        self.store.save(event)
+
+        return event
