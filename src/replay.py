@@ -1,9 +1,5 @@
 """
-Replay and time-machine functionality for ChronoReplay.
-
-The ReplayEngine reconstructs application state from stored events.
-
-Only Python standard-library functionality is used.
+ChronoReplay replay and time-machine engine.
 """
 
 from src.event import Event
@@ -12,16 +8,8 @@ from src.store import EventStore
 
 
 class ReplayEngine:
-    """
-    Reconstructs application state from event history.
-
-    The original event history is never modified.
-    """
 
     def __init__(self, store: EventStore):
-        """
-        Create a ReplayEngine using an EventStore.
-        """
 
         if not isinstance(store, EventStore):
             raise ValueError(
@@ -30,36 +18,32 @@ class ReplayEngine:
 
         self.store = store
 
-    def replay_all(self) -> dict:
-        """
-        Replay the complete event history.
+    # =========================================================
+    # FULL REPLAY
+    # =========================================================
 
-        Returns:
-            Final reconstructed state.
-        """
+    def replay_all(self) -> dict:
 
         events = self.store.get_all()
 
         return self._replay_events(events)
 
-    def replay_until(self, event_number: int) -> dict:
-        """
-        Reconstruct state up to a specific event.
+    # =========================================================
+    # REPLAY UNTIL EVENT
+    # =========================================================
 
-        Example:
+    def replay_until(
+        self,
+        event_number: int
+    ) -> dict:
 
-            replay_until(3)
-
-        means:
-
-            Event 1
-            Event 2
-            Event 3
-
-        are applied.
-
-        Events after #3 are ignored for this reconstruction.
-        """
+        if (
+            isinstance(event_number, bool)
+            or not isinstance(event_number, int)
+        ):
+            raise ValueError(
+                "Event number must be an integer."
+            )
 
         if event_number < 1:
             raise ValueError(
@@ -73,16 +57,18 @@ class ReplayEngine:
                 "Requested event number does not exist."
             )
 
-        selected_events = events[:event_number]
-
         return self._replay_events(
-            selected_events
+            events[:event_number]
         )
 
-    def replay_event(self, event_id: str) -> dict:
-        """
-        Reconstruct state immediately after a specific event ID.
-        """
+    # =========================================================
+    # REPLAY EVENT
+    # =========================================================
+
+    def replay_event(
+        self,
+        event_id: str
+    ) -> dict:
 
         events = self.store.get_all()
 
@@ -91,32 +77,187 @@ class ReplayEngine:
             if event.id == event_id:
 
                 return self._replay_events(
-                    events[: index + 1]
+                    events[:index + 1]
                 )
 
         raise ValueError(
             f"Event '{event_id}' does not exist."
         )
 
-    def get_history(self) -> list:
-        """
-        Return the complete event history.
-        """
+    # =========================================================
+    # REPLAY USER
+    # =========================================================
 
+    def replay_user(
+        self,
+        user_id: str
+    ) -> dict:
+
+        events = self.store.get_all()
+
+        selected = []
+
+        for event in events:
+
+            if event.data.get("user_id") == user_id:
+                selected.append(event)
+
+        return self._replay_events(selected)
+
+    # =========================================================
+    # HISTORY
+    # =========================================================
+
+    def get_history(self) -> list:
         return self.store.get_all()
 
     def history_count(self) -> int:
-        """
-        Return the number of stored events.
-        """
-
         return self.store.count()
 
+    # =========================================================
+    # EVENT DETAILS
+    # =========================================================
+
+    def get_event_number(
+        self,
+        event_id: str
+    ):
+
+        events = self.store.get_all()
+
+        for index, event in enumerate(events):
+
+            if event.id == event_id:
+                return index + 1
+
+        return None
+
+    # =========================================================
+    # USER TIMELINE
+    # =========================================================
+
+    def get_user_timeline(
+        self,
+        user_id
+    ):
+
+        events = self.store.get_events_for_user(
+            user_id
+        )
+
+        timeline = []
+
+        for number, event in enumerate(events, start=1):
+
+            timeline.append({
+                "number": number,
+                "event_id": event.id,
+                "type": event.type,
+                "timestamp": event.timestamp,
+                "data": event.data,
+            })
+
+        return timeline
+
+    # =========================================================
+    # ORDER TIMELINE
+    # =========================================================
+
+    def get_order_timeline(
+        self,
+        order_id
+    ):
+
+        events = self.store.get_events_for_order(
+            order_id
+        )
+
+        timeline = []
+
+        for number, event in enumerate(events, start=1):
+
+            timeline.append({
+                "number": number,
+                "event_id": event.id,
+                "type": event.type,
+                "timestamp": event.timestamp,
+                "data": event.data,
+            })
+
+        return timeline
+
+    # =========================================================
+    # STATE AT EVENT
+    # =========================================================
+
+    def state_at_event(
+        self,
+        event_number
+    ):
+
+        return self.replay_until(
+            event_number
+        )
+
+    # =========================================================
+    # STATE BEFORE EVENT
+    # =========================================================
+
+    def state_before_event(
+        self,
+        event_number
+    ):
+
+        if event_number <= 1:
+
+            return StateEngine().get_state()
+
+        return self.replay_until(
+            event_number - 1
+        )
+
+    # =========================================================
+    # REPLAY WITH ENGINE / DIAGNOSTICS
+    # =========================================================
+
+    def replay_with_engine(self, event_number: int = None):
+        """
+        Replay up to event_number (or all events) and return (state, engine).
+        """
+        events = self.store.get_all()
+        if event_number is not None:
+            if event_number < 1 or event_number > len(events):
+                raise ValueError("Requested event number out of range.")
+            events = events[:event_number]
+
+        engine = StateEngine()
+        for event in events:
+            engine.apply(event)
+
+        return engine.get_state(), engine
+
+    def get_diagnostics_for_event(self, event_number: int) -> dict:
+        """
+        Check if event at event_number produced an invalid state.
+        """
+        _, engine = self.replay_with_engine(event_number)
+        return engine.get_event_validity(event_number)
+
+    def get_all_diagnostics(self) -> list:
+        """
+        Return all diagnostic items from replaying the entire history.
+        """
+        _, engine = self.replay_with_engine()
+        return engine.get_diagnostics()
+
+    # =========================================================
+    # REPLAY
+    # =========================================================
+
     @staticmethod
-    def _replay_events(events: list) -> dict:
-        """
-        Apply a sequence of events to a fresh StateEngine.
-        """
+    def _replay_events(
+        events: list
+    ) -> dict:
 
         engine = StateEngine()
 

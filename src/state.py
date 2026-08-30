@@ -1,261 +1,390 @@
 """
-State engine for ChronoReplay.
+ChronoReplay state reconstruction engine.
 
-The StateEngine reconstructs the current application state
-by applying events in chronological order.
+The state is NEVER stored as the source of truth.
 
-Only Python standard-library functionality is used.
+It is reconstructed by replaying events.
 """
 
 from copy import deepcopy
-
 from src.event import Event
 
 
 class StateEngine:
-    """
-    Maintains the current state of the system.
-
-    Events are applied one at a time.
-
-    The engine also keeps snapshots so that previous states
-    can later be inspected or restored.
-    """
 
     def __init__(self):
-        """
-        Create an empty state engine.
-        """
-
-        # Current reconstructed state.
-        self._state = {
+        self.state = {
             "users": {},
             "orders": {},
             "payments": [],
+            "files": {},
         }
-
-        # State snapshots after every event.
         self._snapshots = []
-
-        # Number of events processed.
+        self._diagnostics = []
         self._event_count = 0
 
-    def apply(self, event: Event) -> None:
-        """
-        Apply one event to the current state.
-        """
+    # =========================================================
+    # APPLY EVENT
+    # =========================================================
+
+    def apply(self, event: Event):
 
         if not isinstance(event, Event):
             raise ValueError(
-                "Only Event objects can be applied."
+                "StateEngine can only apply Event objects."
             )
 
         event_type = event.type
         data = event.data
 
         if event_type == "user.created":
-            self._apply_user_created(data)
+            self._user_created(data)
 
         elif event_type == "profile.updated":
-            self._apply_profile_updated(data)
+            self._profile_updated(data)
 
         elif event_type == "status.changed":
-            self._apply_status_changed(data)
+            self._status_changed(data)
 
         elif event_type == "balance.added":
-            self._apply_balance_added(data)
+            self._balance_added(data)
 
         elif event_type == "payment.completed":
-            self._apply_payment_completed(data)
+            self._payment_completed(data)
 
         elif event_type == "order.created":
-            self._apply_order_created(data)
+            self._order_created(data)
 
         elif event_type == "order.updated":
-            self._apply_order_updated(data)
+            self._order_updated(data)
 
         elif event_type == "user.deleted":
-            self._apply_user_deleted(data)
+            self._user_deleted(data)
+
+        # State recovery events
+        elif event_type == "state.restored":
+            self._apply_state_restored(data)
+
+        # File events do not modify core application state
+        elif event_type == "file.created":
+            self._file_created(data)
+
+        elif event_type == "file.modified":
+            self._file_modified(data)
+
+        elif event_type == "file.deleted":
+            self._file_deleted(data)
+
+        elif event_type == "file.restored":
+            self._file_restored(data)
 
         else:
             raise ValueError(
                 f"Unsupported event type: {event_type}"
             )
 
-        # Increase processed event count.
         self._event_count += 1
+        self._snapshots.append(deepcopy(self.state))
 
-        # Save a snapshot after processing the event.
-        self._snapshots.append(
-            deepcopy(self._state)
-        )
+    # =========================================================
+    # USER CREATED
+    # =========================================================
 
-    def _apply_user_created(self, data: dict) -> None:
-        """
-        Create a new user.
-        """
+    def _user_created(self, data):
 
         user_id = data["user_id"]
 
-        self._state["users"][user_id] = {
+        self.state["users"][user_id] = {
             "user_id": user_id,
             "name": data.get("name", ""),
             "email": data.get("email", ""),
-            "age": data.get("age"),
+            "age": data.get("age", 0),
             "status": "active",
-            "balance": 0,
+            "balance": 0.0,
+            "deleted": False,
         }
 
-    def _apply_profile_updated(self, data: dict) -> None:
-        """
-        Update a user's profile.
-        """
+    # =========================================================
+    # PROFILE
+    # =========================================================
 
-        user_id = data["user_id"]
+    def _profile_updated(self, data):
 
-        user = self._get_user(user_id)
+        user = self._get_user(data["user_id"])
 
         user["name"] = data["name"]
-        user["city"] = data["city"]
+        user["city"] = data.get("city", "")
 
-    def _apply_status_changed(self, data: dict) -> None:
-        """
-        Change a user's status.
-        """
+    # =========================================================
+    # STATUS
+    # =========================================================
 
-        user_id = data["user_id"]
+    def _status_changed(self, data):
 
-        user = self._get_user(user_id)
+        user = self._get_user(data["user_id"])
 
         user["status"] = data["status"]
 
-    def _apply_balance_added(self, data: dict) -> None:
-        """
-        Add money to a user's balance.
-        """
+    # =========================================================
+    # BALANCE
+    # =========================================================
 
-        user_id = data["user_id"]
+    def _balance_added(self, data):
 
-        user = self._get_user(user_id)
+        user = self._get_user(data["user_id"])
 
-        user["balance"] += data["amount"]
+        user["balance"] += float(data["amount"])
 
-    def _apply_payment_completed(self, data: dict) -> None:
-        """
-        Record a completed payment.
-        """
+    # =========================================================
+    # PAYMENT
+    # =========================================================
 
-        payment = {
+    def _payment_completed(self, data):
+
+        user = self._get_user(data["user_id"])
+
+        amount = float(data["amount"])
+
+        # Check balance invariant: if balance before payment was less than amount, flag invalid state
+        is_valid = user["balance"] >= amount
+        if not is_valid:
+            self._diagnostics.append({
+                "event_index": self._event_count + 1,
+                "type": "payment.completed",
+                "is_valid": False,
+                "reason": "Payment cannot be completed because the available balance is insufficient.",
+                "user_id": data["user_id"],
+                "amount": amount,
+                "balance_before": user["balance"],
+                "deficit": amount - user["balance"],
+            })
+        else:
+            self._diagnostics.append({
+                "event_index": self._event_count + 1,
+                "type": "payment.completed",
+                "is_valid": True,
+                "reason": None,
+                "user_id": data["user_id"],
+                "amount": amount,
+            })
+
+        # If payment is valid, deduct from balance and update order
+        if is_valid:
+            user["balance"] -= amount
+        else:
+            # When payment is invalid (insufficient funds), balance must NOT drop into negative.
+            # Balance is preserved and kept at >= 0.0.
+            user["balance"] = max(0.0, user["balance"])
+
+        payment_entry = {
             "user_id": data["user_id"],
-            "amount": data["amount"],
-            "method": data["method"],
+            "amount": amount,
+            "method": data.get("method", "UPI"),
         }
 
-        self._state["payments"].append(payment)
+        order_id = data.get("order_id")
+        if order_id:
+            payment_entry["order_id"] = order_id
+            if order_id in self.state["orders"]:
+                order = self.state["orders"][order_id]
+                if is_valid:
+                    order["paid_amount"] = order.get("paid_amount", 0.0) + amount
+                    if order["paid_amount"] >= order["amount"]:
+                        order["status"] = "Paid"
 
-    def _apply_order_created(self, data: dict) -> None:
-        """
-        Create an order.
-        """
+        self.state["payments"].append(payment_entry)
+
+    # =========================================================
+    # ORDER CREATED
+    # =========================================================
+
+    def _order_created(self, data):
+
+        user = self._get_user(data["user_id"])
 
         order_id = data["order_id"]
 
-        self._state["orders"][order_id] = {
+        self.state["orders"][order_id] = {
             "order_id": order_id,
-            "user_id": data["user_id"],
-            "amount": data["amount"],
+            "user_id": user["user_id"],
+            "amount": float(data["amount"]),
             "status": "pending",
         }
 
-    def _apply_order_updated(self, data: dict) -> None:
-        """
-        Update an existing order.
-        """
+    # =========================================================
+    # ORDER UPDATED
+    # =========================================================
+
+    def _order_updated(self, data):
 
         order_id = data["order_id"]
 
-        if order_id not in self._state["orders"]:
+        if order_id not in self.state["orders"]:
             raise ValueError(
                 f"Order '{order_id}' does not exist."
             )
 
-        self._state["orders"][order_id]["status"] = (
-            data["status"]
-        )
+        self.state["orders"][order_id]["status"] = data["status"]
 
-    def _apply_user_deleted(self, data: dict) -> None:
-        """
-        Delete a user from the current state.
-        """
+    # =========================================================
+    # USER DELETED
+    # =========================================================
 
-        user_id = data["user_id"]
+    def _user_deleted(self, data):
 
-        self._state["users"].pop(
-            user_id,
-            None,
-        )
+        user = self._get_user(data["user_id"])
 
-    def _get_user(self, user_id: str) -> dict:
-        """
-        Return a user or raise an error if the user doesn't exist.
-        """
+        del self.state["users"][data["user_id"]]
 
-        if user_id not in self._state["users"]:
+    # =========================================================
+    # FILE EVENTS
+    # =========================================================
+
+    def _file_created(self, data):
+        file_path = data["file_path"]
+        self.state["files"][file_path] = {
+            "file_path": file_path,
+            "snapshot_id": data.get("snapshot_id"),
+            "content_hash": data.get("content_hash"),
+            "exists": True,
+        }
+
+    def _file_modified(self, data):
+        file_path = data["file_path"]
+        self.state["files"][file_path] = {
+            "file_path": file_path,
+            "snapshot_id": data.get("snapshot_id"),
+            "content_hash": data.get("content_hash"),
+            "exists": True,
+        }
+
+    def _file_deleted(self, data):
+        file_path = data["file_path"]
+        if file_path in self.state["files"]:
+            self.state["files"][file_path]["exists"] = False
+        else:
+            self.state["files"][file_path] = {
+                "file_path": file_path,
+                "snapshot_id": None,
+                "content_hash": None,
+                "exists": False,
+            }
+
+    def _file_restored(self, data):
+        file_path = data["file_path"]
+        self.state["files"][file_path] = {
+            "file_path": file_path,
+            "snapshot_id": data.get("snapshot_id"),
+            "content_hash": data.get("content_hash"),
+            "exists": True,
+        }
+
+    def _apply_state_restored(self, data: dict) -> None:
+        source_event_number = data["source_event_number"]
+
+        if not isinstance(source_event_number, int):
+            raise ValueError("source_event_number must be an integer.")
+
+        if source_event_number < 1:
+            raise ValueError("source_event_number must be at least 1.")
+
+        if source_event_number > len(self._snapshots):
+            raise ValueError("Cannot restore to a future or unavailable event.")
+
+        self.state = deepcopy(self._snapshots[source_event_number - 1])
+
+    # =========================================================
+    # HELPERS
+    # =========================================================
+
+    def _get_user(self, user_id):
+
+        if user_id not in self.state["users"]:
             raise ValueError(
                 f"User '{user_id}' does not exist."
             )
 
-        return self._state["users"][user_id]
+        return self.state["users"][user_id]
 
-    def get_state(self) -> dict:
-        """
-        Return a copy of the current state.
-        """
+    # =========================================================
+    # STATE
+    # =========================================================
 
-        return deepcopy(self._state)
+    def get_state(self):
 
-    def get_snapshot(self, event_number: int) -> dict:
-        """
-        Return the state after a specific event.
+        return {
+            "users": {
+                key: dict(value)
+                for key, value in self.state["users"].items()
+            },
+            "orders": {
+                key: dict(value)
+                for key, value in self.state["orders"].items()
+            },
+            "payments": list(self.state.get("payments", [])),
+            "files": {
+                key: dict(value)
+                for key, value in self.state.get("files", {}).items()
+            },
+        }
 
-        event_number:
-            1 = state after first event
-            2 = state after second event
-            etc.
-        """
+    # =========================================================
+    # USER STATE
+    # =========================================================
 
-        if event_number < 1:
-            raise ValueError(
-                "Event number must be at least 1."
-            )
+    def get_user(self, user_id):
 
-        if event_number > len(self._snapshots):
-            raise ValueError(
-                "Requested event number does not exist."
-            )
-
-        return deepcopy(
-            self._snapshots[event_number - 1]
+        return dict(
+            self._get_user(user_id)
         )
 
-    def event_count(self) -> int:
-        """
-        Return the number of processed events.
-        """
+    # =========================================================
+    # ORDER STATE
+    # =========================================================
 
+    def get_order(self, order_id):
+
+        if order_id not in self.state["orders"]:
+            raise ValueError(
+                f"Order '{order_id}' does not exist."
+            )
+
+        return dict(
+            self.state["orders"][order_id]
+        )
+
+    # =========================================================
+    # SNAPSHOTS & COUNTS
+    # =========================================================
+
+    def get_snapshot(self, event_number: int) -> dict:
+        if event_number < 1:
+            raise ValueError("Event number must be at least 1.")
+
+        if event_number > len(self._snapshots):
+            raise ValueError("Requested event number does not exist.")
+
+        return deepcopy(self._snapshots[event_number - 1])
+
+    def event_count(self) -> int:
         return self._event_count
 
-    def reset(self) -> None:
-        """
-        Completely reset the state engine.
-        """
+    def get_diagnostics(self) -> list:
+        return list(self._diagnostics)
 
-        self._state = {
+    def get_event_validity(self, event_number: int) -> dict:
+        for diag in self._diagnostics:
+            if diag.get("event_index") == event_number:
+                return diag
+        return {"event_index": event_number, "is_valid": True, "reason": None}
+
+    def reset(self) -> None:
+        self.state = {
             "users": {},
             "orders": {},
             "payments": [],
+            "files": {},
         }
-
         self._snapshots = []
-
+        self._diagnostics = []
         self._event_count = 0

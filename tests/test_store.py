@@ -338,6 +338,35 @@ class TestEventStore(unittest.TestCase):
             event.data,
         )
 
+    def test_get_all_tracked_files_and_get_events_for_file(self):
+        """
+        get_all_tracked_files() and get_events_for_file() should track file events.
+        """
+        event1 = self.create_event(
+            "file.created",
+            {"file_path": "src/main.py", "content_hash": "abc"}
+        )
+        event2 = self.create_event(
+            "file.modified",
+            {"file_path": "src/main.py", "content_hash": "def"}
+        )
+        event3 = self.create_event(
+            "file.created",
+            {"file_path": "docs/readme.md", "content_hash": "123"}
+        )
+
+        self.store.save(event1)
+        self.store.save(event2)
+        self.store.save(event3)
+
+        tracked = self.store.get_all_tracked_files()
+        self.assertEqual(tracked, ["docs/readme.md", "src/main.py"])
+
+        file_events = self.store.get_events_for_file("src/main.py")
+        self.assertEqual(len(file_events), 2)
+        self.assertEqual(file_events[0].id, event1.id)
+        self.assertEqual(file_events[1].id, event2.id)
+
 
 if __name__ == "__main__":
     unittest.main()

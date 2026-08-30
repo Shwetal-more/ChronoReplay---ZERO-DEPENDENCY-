@@ -258,6 +258,34 @@ class TestStateEngine(unittest.TestCase):
             {},
         )
 
+    def test_payment_insufficient_balance_does_not_produce_negative_balance(self):
+        """
+        When user has balance 200 and tries to make payment of 300,
+        the balance should NOT become negative (-100).
+        It must remain non-negative, and the invariant violation is diagnosed.
+        """
+        engine = StateEngine()
+        engine.apply(self.create_user())
+        engine.apply(Event.create("balance.added", {"user_id": "U001", "amount": 200}))
+
+        # State before payment
+        self.assertEqual(engine.get_state()["users"]["U001"]["balance"], 200)
+
+        # Payment exceeding balance
+        engine.apply(Event.create("payment.completed", {"user_id": "U001", "amount": 300, "method": "UPI"}))
+
+        # Balance must NOT be negative
+        user_balance = engine.get_state()["users"]["U001"]["balance"]
+        self.assertGreaterEqual(user_balance, 0)
+        self.assertEqual(user_balance, 200)
+
+        # Invariant violation diagnostics
+        diag = engine.get_diagnostics()
+        self.assertEqual(len(diag), 1)
+        self.assertFalse(diag[0]["is_valid"])
+        self.assertEqual(diag[0]["deficit"], 100)
+        self.assertIn("insufficient", diag[0]["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()
