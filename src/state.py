@@ -145,6 +145,14 @@ class StateEngine:
 
         amount = float(data["amount"])
 
+        # Auto-resolve target order if not explicitly provided
+        order_id = data.get("order_id")
+        if not order_id:
+            for oid, ord_info in self.state["orders"].items():
+                if ord_info.get("user_id") == data["user_id"] and ord_info.get("status") in ("pending", "created"):
+                    order_id = oid
+                    break
+
         # Check balance invariant: if balance before payment was less than amount, flag invalid state
         is_valid = user["balance"] >= amount
         if not is_valid:
@@ -154,6 +162,7 @@ class StateEngine:
                 "is_valid": False,
                 "reason": "Payment cannot be completed because the available balance is insufficient.",
                 "user_id": data["user_id"],
+                "order_id": order_id,
                 "amount": amount,
                 "balance_before": user["balance"],
                 "deficit": amount - user["balance"],
@@ -165,6 +174,7 @@ class StateEngine:
                 "is_valid": True,
                 "reason": None,
                 "user_id": data["user_id"],
+                "order_id": order_id,
                 "amount": amount,
             })
 
@@ -180,9 +190,9 @@ class StateEngine:
             "user_id": data["user_id"],
             "amount": amount,
             "method": data.get("method", "UPI"),
+            "status": "success" if is_valid else "failed_insufficient_funds",
         }
 
-        order_id = data.get("order_id")
         if order_id:
             payment_entry["order_id"] = order_id
             if order_id in self.state["orders"]:
@@ -190,7 +200,7 @@ class StateEngine:
                 if is_valid:
                     order["paid_amount"] = order.get("paid_amount", 0.0) + amount
                     if order["paid_amount"] >= order["amount"]:
-                        order["status"] = "Paid"
+                        order["status"] = "paid"
 
         self.state["payments"].append(payment_entry)
 
@@ -208,6 +218,7 @@ class StateEngine:
             "order_id": order_id,
             "user_id": user["user_id"],
             "amount": float(data["amount"]),
+            "paid_amount": 0.0,
             "status": "pending",
         }
 
@@ -231,10 +242,9 @@ class StateEngine:
     # =========================================================
 
     def _user_deleted(self, data):
-
-        user = self._get_user(data["user_id"])
-
-        del self.state["users"][data["user_id"]]
+        user_id = data.get("user_id")
+        if user_id in self.state["users"]:
+            del self.state["users"][user_id]
 
     # =========================================================
     # FILE EVENTS

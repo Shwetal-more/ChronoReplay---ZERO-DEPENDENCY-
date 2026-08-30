@@ -136,5 +136,56 @@ class TestWorkspaceManager(unittest.TestCase):
             )
 
 
+    def test_multi_workspace_isolation(self):
+        from src.store import EventStore
+        import tempfile
+        import shutil
+
+        store_dir = tempfile.mkdtemp()
+        db_path = os.path.join(store_dir, "test_iso.db")
+        store = EventStore(db_path)
+
+        ws1_dir = tempfile.mkdtemp()
+        ws2_dir = tempfile.mkdtemp()
+
+        try:
+            # Workspace 1 has file_a.txt and file_b.txt
+            with open(os.path.join(ws1_dir, "file_a.txt"), "w") as f:
+                f.write("Hello A")
+            with open(os.path.join(ws1_dir, "file_b.txt"), "w") as f:
+                f.write("Hello B")
+
+            # Workspace 2 has only file_x.txt
+            with open(os.path.join(ws2_dir, "file_x.txt"), "w") as f:
+                f.write("Hello X")
+
+            mgr1 = WorkspaceManager(ws1_dir, store)
+            mgr2 = WorkspaceManager(ws2_dir, store)
+
+            # Scan WS1
+            sum1 = mgr1.scan_and_record_changes()
+            self.assertEqual(sum1["created"], 2)
+
+            # Scan WS2
+            sum2 = mgr2.scan_and_record_changes()
+            self.assertEqual(sum2["created"], 1)
+            self.assertEqual(sum2["deleted"], 0)
+
+            # Check status in WS2: must only contain file_x.txt, not file_a.txt or file_b.txt
+            ws2_files = mgr2.get_workspace_files_with_status()
+            file_names = [f["file_path"] for f in ws2_files]
+            self.assertEqual(file_names, ["file_x.txt"])
+
+            # Check status in WS1: must only contain file_a.txt and file_b.txt
+            ws1_files = mgr1.get_workspace_files_with_status()
+            file_names1 = [f["file_path"] for f in ws1_files]
+            self.assertEqual(file_names1, ["file_a.txt", "file_b.txt"])
+
+        finally:
+            shutil.rmtree(store_dir, ignore_errors=True)
+            shutil.rmtree(ws1_dir, ignore_errors=True)
+            shutil.rmtree(ws2_dir, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

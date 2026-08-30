@@ -29,25 +29,44 @@ class EventSimulator:
         self._sync_active_user()
 
     def _sync_active_user(self):
-        """Find the latest created user if none is active."""
+        """Find the latest active non-deleted user if none is active."""
         if self.current_user_id is None:
-            all_events = self.store.get_all()
-            for evt in reversed(all_events):
-                if evt.type == "user.created" and "user_id" in evt.data:
-                    self.current_user_id = evt.data["user_id"]
-                    self.current_user_name = evt.data.get("name", "")
-                    self.current_user_email = evt.data.get("email", "")
-                    break
+            active_users = [u for u in self.get_all_users() if u.get("status") != "deleted"]
+            if active_users:
+                last_active = active_users[-1]
+                self.current_user_id = last_active["user_id"]
+                self.current_user_name = last_active.get("name", "")
+                self.current_user_email = last_active.get("email", "")
+            else:
+                self.current_user_id = None
+                self.current_user_name = None
+                self.current_user_email = None
 
     def get_current_user(self):
-        """Return details of currently active user or None."""
+        """Return details of currently active non-deleted user or None."""
         if not self.current_user_id:
             return None
-        return {
-            "user_id": self.current_user_id,
-            "name": self.current_user_name or "Unknown",
-            "email": self.current_user_email or "",
-        }
+        for u in self.get_all_users():
+            if u["user_id"] == self.current_user_id and u.get("status") != "deleted":
+                return {
+                    "user_id": u["user_id"],
+                    "name": u.get("name") or self.current_user_name or "Unknown",
+                    "email": u.get("email") or self.current_user_email or "",
+                }
+        active_users = [u for u in self.get_all_users() if u.get("status") != "deleted"]
+        if active_users:
+            self.current_user_id = active_users[0]["user_id"]
+            self.current_user_name = active_users[0].get("name", "")
+            self.current_user_email = active_users[0].get("email", "")
+            return {
+                "user_id": self.current_user_id,
+                "name": self.current_user_name or "Unknown",
+                "email": self.current_user_email or "",
+            }
+        self.current_user_id = None
+        self.current_user_name = None
+        self.current_user_email = None
+        return None
 
     def _next_user_seq(self):
         """Calculate next sequential user number."""
@@ -139,6 +158,14 @@ class EventSimulator:
                     users[uid]["status"] = "deleted"
         return list(users.values())
 
+    def get_active_users(self):
+        """Return only active (non-deleted) users."""
+        return [u for u in self.get_all_users() if u.get("status") != "deleted"]
+
+    def get_ex_users(self):
+        """Return ex-users (deleted users)."""
+        return [u for u in self.get_all_users() if u.get("status") == "deleted"]
+
     def switch_user(self, user_id):
         """Switch active user by ID."""
         for u in self.get_all_users():
@@ -216,6 +243,56 @@ class EventSimulator:
             }
         )
 
+    def get_user_balance(self, user_id=None):
+        """Calculate current user balance from stored events."""
+        uid = user_id or self.current_user_id
+        if not uid:
+            return 0.0
+        balance = 0.0
+        for ev in self.store.get_all():
+            if ev.data.get("user_id") == uid:
+                if ev.type == "balance.added":
+                    balance += float(ev.data.get("amount", 0.0))
+                elif ev.type == "payment.completed":
+                    amt = float(ev.data.get("amount", 0.0))
+                    if balance >= amt:
+                        balance -= amt
+        return balance
+
+    def get_user_orders(self, user_id=None):
+        """Reconstruct list of all orders for user with payment amounts and statuses."""
+        uid = user_id or self.current_user_id
+        if not uid:
+            return []
+        orders = {}
+        for ev in self.store.get_all():
+            if ev.type == "order.created" and ev.data.get("user_id") == uid:
+                oid = ev.data.get("order_id")
+                orders[oid] = {
+                    "order_id": oid,
+                    "user_id": uid,
+                    "amount": float(ev.data.get("amount", 0.0)),
+                    "paid_amount": 0.0,
+                    "status": "pending",
+                }
+            elif ev.type == "payment.completed" and ev.data.get("user_id") == uid:
+                oid = ev.data.get("order_id")
+                if oid and oid in orders:
+                    amt = float(ev.data.get("amount", 0.0))
+                    orders[oid]["paid_amount"] += amt
+                    if orders[oid]["paid_amount"] >= orders[oid]["amount"]:
+                        orders[oid]["status"] = "paid"
+            elif ev.type == "order.updated":
+                oid = ev.data.get("order_id")
+                if oid and oid in orders:
+                    orders[oid]["status"] = ev.data.get("status", orders[oid]["status"])
+        return list(orders.values())
+
+    def get_user_pending_orders(self, user_id=None):
+        """Return list of pending orders that still have a remaining balance to be paid."""
+        orders = self.get_user_orders(user_id)
+        return [o for o in orders if o.get("status") in ("pending", "created") and (o.get("amount", 0.0) - o.get("paid_amount", 0.0)) > 0]
+
     # =========================================================
     # CREATE ORDER
     # =========================================================
@@ -241,6 +318,8 @@ class EventSimulator:
                 "amount": float(amount),
             }
         )
+        self.current_order_id = order_id
+        self.current_order_amount = float(amount)
         return event
 
     # =========================================================
@@ -254,21 +333,28 @@ class EventSimulator:
         order_id=None
     ):
         if self.current_user_id is None:
-            self.create_user(
-                "Rahul",
-                "rahul@gmail.com",
-                25
+            raise ValueError(
+                "No user selected. Please create or select a user first."
+            )
+
+        target_order = order_id or self.current_order_id
+        if not target_order:
+            for ev in reversed(self.store.get_all()):
+                if ev.type == "order.created" and ev.data.get("user_id") == self.current_user_id:
+                    target_order = ev.data.get("order_id")
+                    break
+
+        if not target_order:
+            raise ValueError(
+                "No order found for this user. You cannot complete a payment without creating an order first. Please create an order first."
             )
 
         data = {
             "user_id": self.current_user_id,
             "amount": float(amount),
             "method": method,
+            "order_id": target_order,
         }
-        if order_id:
-            data["order_id"] = order_id
-        elif self.current_order_id:
-            data["order_id"] = self.current_order_id
 
         return self._save(
             "payment.completed",
@@ -348,18 +434,32 @@ class EventSimulator:
     # USER DELETED
     # =========================================================
 
-    def delete_user(self):
-        if self.current_user_id is None:
+    def delete_user(self, user_id=None):
+        target_uid = user_id or self.current_user_id
+        if target_uid is None:
             raise ValueError("No user is selected.")
 
         event = self._save(
             "user.deleted",
             {
-                "user_id": self.current_user_id,
+                "user_id": target_uid,
             }
         )
-        self.current_user_id = None
-        self.current_user_name = None
-        self.current_user_email = None
-        self.current_order_id = None
+
+        # If the deleted user was the active user, auto-switch to another existing active user
+        if self.current_user_id == target_uid:
+            remaining_users = [
+                u for u in self.get_all_users()
+                if u.get("status") != "deleted" and u.get("user_id") != target_uid
+            ]
+            if remaining_users:
+                self.current_user_id = remaining_users[0]["user_id"]
+                self.current_user_name = remaining_users[0]["name"]
+                self.current_user_email = remaining_users[0]["email"]
+            else:
+                self.current_user_id = None
+                self.current_user_name = None
+                self.current_user_email = None
+            self.current_order_id = None
+            self.current_order_amount = None
         return event

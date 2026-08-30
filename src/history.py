@@ -10,6 +10,7 @@ It uses EventStore's existing events and snapshots.
 Only Python standard-library functionality is used.
 """
 
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -97,10 +98,10 @@ class VersionHistory:
     # FILE LIST
     # =========================================================
 
-    def list_files(self):
+    def list_files(self, workspace_path: Optional[str] = None):
         """
         Return all workspace files that have appeared
-        in the event history.
+        in the event history (optionally filtered by workspace_path).
 
         Deleted files are included because they are still
         part of the historical record.
@@ -115,6 +116,11 @@ class VersionHistory:
             if event.type not in self.FILE_EVENT_TYPES:
                 continue
 
+            if workspace_path is not None:
+                ev_ws = event.data.get("workspace_path")
+                if ev_ws is not None and os.path.abspath(str(ev_ws)) != os.path.abspath(workspace_path):
+                    continue
+
             file_path = event.data.get("file_path")
 
             if file_path:
@@ -126,9 +132,10 @@ class VersionHistory:
     # FILE HISTORY
     # =========================================================
 
-    def get_file_history(self, file_path):
+    def get_file_history(self, file_path, workspace_path: Optional[str] = None):
         """
         Return the complete version history of one file.
+        Optionally filtered by workspace_path.
 
         Versions are returned in chronological order.
         """
@@ -153,6 +160,11 @@ class VersionHistory:
 
             if event.type not in self.FILE_EVENT_TYPES:
                 continue
+
+            if workspace_path is not None:
+                ev_ws = event.data.get("workspace_path")
+                if ev_ws is not None and os.path.abspath(str(ev_ws)) != os.path.abspath(workspace_path):
+                    continue
 
             event_file_path = event.data.get(
                 "file_path"

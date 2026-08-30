@@ -37,6 +37,9 @@ class EventValidator:
         "file.modified",
         "file.deleted",
         "file.restored",
+
+        # State recovery events
+        "state.restored",
     }
 
     VALID_STATUS_VALUES = {
@@ -56,6 +59,7 @@ class EventValidator:
         "confirmed",
         "shipped",
         "completed",
+        "paid",
     }
 
     @classmethod
@@ -120,6 +124,10 @@ class EventValidator:
 
             "file.restored":
                 cls._validate_file_restored,
+
+            # ChronoReplay state recovery
+            "state.restored":
+                cls._validate_state_restored,
         }
 
         validators[event.type](
@@ -365,6 +373,10 @@ class EventValidator:
                 f"{data['method']}"
             )
 
+        if "order_id" in data and data["order_id"] is not None:
+            if not isinstance(data["order_id"], str) or not data["order_id"].strip():
+                raise ValueError("field order_id must be a non-empty string if provided.")
+
     @classmethod
     def _validate_order_created(
         cls,
@@ -540,3 +552,24 @@ class EventValidator:
             data,
             "content_hash"
         )
+
+    @classmethod
+    def _validate_state_restored(
+        cls,
+        data: dict
+    ) -> None:
+        """
+        Validate state.restored.
+
+        Required:
+            source_event_number (int >= 1)
+        """
+        if "source_event_number" not in data:
+            raise ValueError("missing required field: source_event_number")
+
+        val = data["source_event_number"]
+        if isinstance(val, bool) or not isinstance(val, int):
+            raise ValueError("field source_event_number must be an integer.")
+
+        if val < 1:
+            raise ValueError("source_event_number must be at least 1.")

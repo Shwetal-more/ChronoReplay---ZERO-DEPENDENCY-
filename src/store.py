@@ -213,6 +213,12 @@ class EventStore:
 
         self.save(event)
 
+    def append(self, event: Event) -> None:
+        """
+        Alias for save().
+        """
+        self.save(event)
+
     def get(self, event_id: str):
         """
         Retrieve one event by its ID.

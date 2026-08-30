@@ -84,6 +84,46 @@ class ReplayEngine:
             f"Event '{event_id}' does not exist."
         )
 
+    def replay_until_event_id(
+        self,
+        event_id: str
+    ) -> dict:
+        """Replay all historical events up to and including event_id."""
+        return self.replay_event(event_id)
+
+    def replay_before_event_id(
+        self,
+        event_id: str
+    ) -> dict:
+        """Replay all historical events strictly before event_id."""
+        events = self.store.get_all()
+        for index, event in enumerate(events):
+            if event.id == event_id:
+                if index == 0:
+                    return StateEngine().get_state()
+                return self._replay_events(events[:index])
+
+        raise ValueError(
+            f"Event '{event_id}' does not exist."
+        )
+
+    def replay_events_list(
+        self,
+        events: list
+    ) -> dict:
+        """Replay an explicit list of events."""
+        return self._replay_events(events)
+
+    def replay_events_with_engine(
+        self,
+        events: list
+    ):
+        """Replay an explicit list of events returning (state, engine)."""
+        engine = StateEngine()
+        for event in events:
+            engine.apply(event)
+        return engine.get_state(), engine
+
     # =========================================================
     # REPLAY USER
     # =========================================================
@@ -242,6 +282,18 @@ class ReplayEngine:
         """
         _, engine = self.replay_with_engine(event_number)
         return engine.get_event_validity(event_number)
+
+    def get_diagnostics_for_event_id(self, event_id: str) -> dict:
+        """
+        Check if the event with event_id produced an invalid state during historical replay.
+        """
+        events = self.store.get_all()
+        engine = StateEngine()
+        for index, event in enumerate(events, start=1):
+            engine.apply(event)
+            if event.id == event_id:
+                return engine.get_event_validity(index)
+        return {"event_index": 0, "is_valid": True}
 
     def get_all_diagnostics(self) -> list:
         """

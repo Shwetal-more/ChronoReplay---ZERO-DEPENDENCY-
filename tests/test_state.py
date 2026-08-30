@@ -286,6 +286,81 @@ class TestStateEngine(unittest.TestCase):
         self.assertEqual(diag[0]["deficit"], 100)
         self.assertIn("insufficient", diag[0]["reason"])
 
+    def test_order_payment_insufficient_then_topup_and_pay(self):
+        """
+        Tests the complete scenario:
+        1. User creates an order (e.g. ₹200).
+        2. User attempts payment with insufficient balance (balance = 0).
+           -> Order stays pending (paid_amount = 0).
+           -> Balance stays 0 (non-negative).
+           -> Payment recorded with status failed_insufficient_funds and linked to order.
+        3. User adds balance (e.g. ₹500).
+        4. User pays ₹200.
+           -> Order status becomes 'paid', paid_amount = 200.
+           -> User balance becomes 300.
+           -> Payment recorded with status 'success' and linked to order.
+        """
+        engine = StateEngine()
+        engine.apply(self.create_user())
+
+        # Create Order ORD-0001 for 200
+        engine.apply(Event.create("order.created", {
+            "user_id": "U001",
+            "order_id": "ORD-0001",
+            "amount": 200,
+        }))
+
+        state = engine.get_state()
+        self.assertEqual(state["orders"]["ORD-0001"]["status"], "pending")
+        self.assertEqual(state["orders"]["ORD-0001"]["paid_amount"], 0.0)
+        self.assertEqual(state["users"]["U001"]["balance"], 0.0)
+
+        # Attempt payment of 200 with 0 balance
+        engine.apply(Event.create("payment.completed", {
+            "user_id": "U001",
+            "amount": 200,
+            "method": "UPI",
+            "order_id": "ORD-0001",
+        }))
+
+        state = engine.get_state()
+        # Order must remain pending
+        self.assertEqual(state["orders"]["ORD-0001"]["status"], "pending")
+        self.assertEqual(state["orders"]["ORD-0001"]["paid_amount"], 0.0)
+        # Balance must remain 0
+        self.assertEqual(state["users"]["U001"]["balance"], 0.0)
+        # Payment must be classified as failed
+        self.assertEqual(len(state["payments"]), 1)
+        self.assertEqual(state["payments"][0]["status"], "failed_insufficient_funds")
+        self.assertEqual(state["payments"][0]["order_id"], "ORD-0001")
+
+        # Now add balance 500
+        engine.apply(Event.create("balance.added", {
+            "user_id": "U001",
+            "amount": 500,
+        }))
+        state = engine.get_state()
+        self.assertEqual(state["users"]["U001"]["balance"], 500.0)
+
+        # Now complete payment
+        engine.apply(Event.create("payment.completed", {
+            "user_id": "U001",
+            "amount": 200,
+            "method": "UPI",
+            "order_id": "ORD-0001",
+        }))
+
+        state = engine.get_state()
+        # Order must now be paid
+        self.assertEqual(state["orders"]["ORD-0001"]["status"], "paid")
+        self.assertEqual(state["orders"]["ORD-0001"]["paid_amount"], 200.0)
+        # Balance must be 500 - 200 = 300
+        self.assertEqual(state["users"]["U001"]["balance"], 300.0)
+        # Payment must be recorded as success
+        self.assertEqual(len(state["payments"]), 2)
+        self.assertEqual(state["payments"][1]["status"], "success")
+        self.assertEqual(state["payments"][1]["order_id"], "ORD-0001")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -188,7 +188,69 @@ class RestoreManager:
     # RESTORE
     # ---------------------------------------------------------
 
-    def restore(self, snapshot_id, user_id=None):
+    def _merge_current_with_historical(
+        self,
+        current_content,
+        snapshot_content,
+        previous_line_count=None,
+        selected_line_indexes=None,
+    ):
+        """
+        Merge the current workspace with only the historical lines that are
+        missing from the active file, or with a user-selected subset when
+        explicitly chosen.
+        """
+        current_lines = (current_content or "").splitlines()
+        historical_lines = snapshot_content.splitlines()
+
+        if previous_line_count is not None:
+            if isinstance(previous_line_count, bool) or not isinstance(previous_line_count, int):
+                raise ValueError("previous_line_count must be an integer or None.")
+            if previous_line_count < 0:
+                raise ValueError("previous_line_count must be zero or greater.")
+            historical_lines = historical_lines[-previous_line_count:]
+
+        if selected_line_indexes is not None:
+            if isinstance(selected_line_indexes, int):
+                selected_line_indexes = [selected_line_indexes]
+            if not isinstance(selected_line_indexes, (list, tuple)):
+                raise ValueError("selected_line_indexes must be a list, tuple, or integer.")
+            selected_line_indexes = sorted({idx for idx in selected_line_indexes if isinstance(idx, int)})
+            chosen_lines = []
+            for idx in selected_line_indexes:
+                if 0 <= idx < len(historical_lines):
+                    chosen_lines.append(historical_lines[idx])
+        else:
+            current_counts = {}
+            for line in current_lines:
+                current_counts[line] = current_counts.get(line, 0) + 1
+
+            historical_counts = {}
+            for line in historical_lines:
+                historical_counts[line] = historical_counts.get(line, 0) + 1
+
+            chosen_lines = []
+            for line in historical_lines:
+                if current_counts.get(line, 0) < historical_counts.get(line, 0):
+                    chosen_lines.append(line)
+
+        if not chosen_lines:
+            return (current_content or "").rstrip("\n")
+
+        current_text = (current_content or "").rstrip("\n")
+        if not current_text:
+            return "\n".join(chosen_lines)
+
+        return current_text + "\n\n" + "\n".join(chosen_lines)
+
+    def restore(
+        self,
+        snapshot_id,
+        user_id=None,
+        merge_with_current=False,
+        previous_line_count=None,
+        selected_line_indexes=None,
+    ):
         """
         Restore a historical snapshot into the workspace.
 
@@ -202,6 +264,15 @@ class RestoreManager:
                 ID of snapshot to restore.
             user_id:
                 Optional ID of user performing the restoration.
+            merge_with_current:
+                When True, preserve the existing current file and append the
+                selected historical lines instead of overwriting the file.
+            previous_line_count:
+                Number of trailing lines from the historical snapshot to keep
+                when merging. If None, all historical lines are used.
+            selected_line_indexes:
+                Optional indexes from the historical snapshot to append when
+                merge_with_current is enabled.
 
         Returns:
             The generated Event object.
@@ -237,6 +308,17 @@ class RestoreManager:
                 exist_ok=True
             )
 
+        restored_content = snapshot.content
+        if merge_with_current and os.path.exists(full_path):
+            with open(full_path, "r", encoding="utf-8", newline="") as file:
+                current_content = file.read()
+            restored_content = self._merge_current_with_historical(
+                current_content,
+                snapshot.content,
+                previous_line_count=previous_line_count,
+                selected_line_indexes=selected_line_indexes,
+            )
+
         try:
             with open(
                 full_path,
@@ -246,7 +328,7 @@ class RestoreManager:
             ) as file:
 
                 file.write(
-                    snapshot.content
+                    restored_content
                 )
 
         except OSError as exc:
@@ -264,6 +346,11 @@ class RestoreManager:
         }
         if user_id:
             event_data["user_id"] = user_id
+        if merge_with_current:
+            event_data["merge_with_current"] = True
+            event_data["previous_line_count"] = previous_line_count
+            if selected_line_indexes is not None:
+                event_data["selected_line_indexes"] = list(selected_line_indexes)
 
         event = Event.create(
             "file.restored",
@@ -307,7 +394,10 @@ class RestoreManager:
     def restore_version(
         self,
         file_path,
-        version_number
+        version_number,
+        merge_with_current=False,
+        previous_line_count=None,
+        selected_line_indexes=None,
     ):
         """
         Restore a file using its position in version history.
@@ -347,7 +437,12 @@ class RestoreManager:
             vh = VersionHistory(self.store)
             f_ver = vh.get_version(file_path, version_number)
             if f_ver and f_ver.snapshot_id:
-                return self.restore(f_ver.snapshot_id)
+                return self.restore(
+                    f_ver.snapshot_id,
+                    merge_with_current=merge_with_current,
+                    previous_line_count=previous_line_count,
+                    selected_line_indexes=selected_line_indexes,
+                )
         except Exception:
             pass
 
@@ -366,7 +461,10 @@ class RestoreManager:
         ]
 
         return self.restore(
-            snapshot.snapshot_id
+            snapshot.snapshot_id,
+            merge_with_current=merge_with_current,
+            previous_line_count=previous_line_count,
+            selected_line_indexes=selected_line_indexes,
         )
 
     # ---------------------------------------------------------

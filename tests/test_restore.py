@@ -373,6 +373,59 @@ class TestRestoreManager(unittest.TestCase):
             "file.restored"
         )
 
+    def test_restore_merge_with_current_keeps_both_versions(self):
+        """
+        When merge_with_current=True, the current file should remain and
+        historical lines should be appended without erasing the active state.
+        """
+
+        file_path = os.path.join(
+            self.workspace_path,
+            "main.py"
+        )
+
+        with open(
+            file_path,
+            "w",
+            encoding="utf-8"
+        ) as file:
+            file.write(
+                "current\nstate\n"
+            )
+
+        snapshot = self._create_snapshot(
+            "main.py",
+            "prev\nline1\nline2\n"
+        )
+
+        event = self.manager.restore(
+            snapshot.snapshot_id,
+            merge_with_current=True,
+            previous_line_count=2,
+        )
+
+        with open(
+            file_path,
+            "r",
+            encoding="utf-8"
+        ) as file:
+            content = file.read()
+
+        self.assertEqual(
+            content,
+            "current\nstate\n\nline1\nline2"
+        )
+
+        self.assertIsInstance(
+            event,
+            Event
+        )
+
+        self.assertEqual(
+            event.type,
+            "file.restored"
+        )
+
     # =========================================================
     # RESTORE DELETED FILE
     # =========================================================

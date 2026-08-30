@@ -202,6 +202,7 @@ class WorkspaceManager:
             "file_path": snapshot.file_path,
             "snapshot_id": snapshot.snapshot_id,
             "content_hash": snapshot.content_hash,
+            "workspace_path": self.workspace_path,
         }
         if user_id:
             data["user_id"] = user_id
@@ -219,6 +220,7 @@ class WorkspaceManager:
             "file_path": snapshot.file_path,
             "snapshot_id": snapshot.snapshot_id,
             "content_hash": snapshot.content_hash,
+            "workspace_path": self.workspace_path,
         }
         if user_id:
             data["user_id"] = user_id
@@ -234,6 +236,7 @@ class WorkspaceManager:
     ) -> Event:
         data = {
             "file_path": file_path,
+            "workspace_path": self.workspace_path,
         }
         if user_id:
             data["user_id"] = user_id
@@ -251,6 +254,7 @@ class WorkspaceManager:
             "file_path": snapshot.file_path,
             "snapshot_id": snapshot.snapshot_id,
             "content_hash": snapshot.content_hash,
+            "workspace_path": self.workspace_path,
         }
         if user_id:
             data["user_id"] = user_id
@@ -266,6 +270,7 @@ class WorkspaceManager:
     def scan(self):
         """
         Scan workspace directory and return relative paths of files.
+        Only files inside this workspace directory are scanned.
         """
         files = []
         ignored_dirs = {
@@ -295,7 +300,11 @@ class WorkspaceManager:
             ]
 
             for filename in filenames:
-                if filename.startswith(".") or filename.endswith(".pyc") or filename == "chronoreplay.db":
+                if (
+                    filename.startswith(".")
+                    or filename.endswith(".pyc")
+                    or filename in ("chronoreplay.db", "events.db")
+                ):
                     continue
 
                 full_path = os.path.join(
@@ -308,8 +317,10 @@ class WorkspaceManager:
                     self.workspace_path
                 )
 
+                # Normalize path separators across platforms (Windows / Unix)
+                normalized_path = relative_path.replace("\\", "/")
                 files.append(
-                    relative_path
+                    normalized_path
                 )
 
         return sorted(files)
@@ -329,14 +340,16 @@ class WorkspaceManager:
         if self.store is None:
             raise ValueError("EventStore is required to track files.")
 
+        normalized_rel_path = relative_path.replace("\\", "/")
+
         full_path = os.path.join(
             self.workspace_path,
-            relative_path
+            normalized_rel_path
         )
 
         if not os.path.isfile(full_path):
             raise ValueError(
-                f"File does not exist: {relative_path}"
+                f"File does not exist: {normalized_rel_path}"
             )
 
         with open(
@@ -351,7 +364,7 @@ class WorkspaceManager:
         )
 
         history = self.store.get_snapshots_for_file(
-            relative_path
+            normalized_rel_path
         )
 
         # -----------------------------------------------------
@@ -361,7 +374,7 @@ class WorkspaceManager:
         if not history:
             snapshot = Snapshot.create(
                 snapshot_id=str(uuid.uuid4()),
-                file_path=relative_path,
+                file_path=normalized_rel_path,
                 content=content,
             )
 
@@ -395,7 +408,7 @@ class WorkspaceManager:
 
         snapshot = Snapshot.create(
             snapshot_id=str(uuid.uuid4()),
-            file_path=relative_path,
+            file_path=normalized_rel_path,
             content=content,
         )
 
@@ -438,6 +451,30 @@ class WorkspaceManager:
         """
         return self.scan_and_record_changes()
 
+    def get_workspace_tracked_files(self):
+        """
+        Return relative file paths that were explicitly recorded in this workspace path,
+        or are physically present on disk in this directory.
+        """
+        tracked = set()
+        if self.store:
+            for event in self.store.get_all():
+                if event.type.startswith("file.") and "file_path" in event.data:
+                    ev_ws = event.data.get("workspace_path")
+                    norm_path = event.data["file_path"].replace("\\", "/")
+
+                    # If tagged with a workspace path, only include if it matches this workspace
+                    if ev_ws is not None:
+                        if os.path.abspath(str(ev_ws)) == self.workspace_path:
+                            tracked.add(norm_path)
+                    else:
+                        # Legacy untagged file: only associate with this workspace if physically on disk
+                        full_path = os.path.join(self.workspace_path, norm_path)
+                        if os.path.isfile(full_path):
+                            tracked.add(norm_path)
+
+        return tracked
+
     def scan_and_record_changes(self):
         """
         Scan workspace, compare with historical snapshots,
@@ -463,14 +500,16 @@ class WorkspaceManager:
             elif event.type == "file.modified":
                 modified += 1
 
-        # Check for deleted files (files previously tracked but no longer present on disk)
+        # Check for deleted files (files previously tracked in this workspace that are no longer present on disk)
         if self.store:
-            all_tracked = set(self.store.get_all_tracked_files())
-            for file_path in all_tracked:
+            workspace_tracked = self.get_workspace_tracked_files()
+            for file_path in sorted(workspace_tracked):
                 if file_path not in current_files:
                     # Check if already marked deleted
-                    snapshots = self.store.get_snapshots_for_file(file_path)
-                    all_events = self.store.get_events_for_file(file_path)
+                    all_events = [
+                        e for e in self.store.get_events_for_file(file_path)
+                        if e.data.get("workspace_path") is None or os.path.abspath(str(e.data.get("workspace_path"))) == self.workspace_path
+                    ]
                     if all_events and all_events[-1].type != "file.deleted":
                         del_evt = self.delete_file_event(file_path)
                         EventValidator.validate(del_evt)
@@ -488,11 +527,11 @@ class WorkspaceManager:
     def get_workspace_files_with_status(self):
         """
         Return list of workspace files with their status.
+        Only files belonging to this selected workspace (currently on disk in this folder,
+        or previously recorded and deleted from this workspace folder) are returned.
         """
         current_files = set(self.scan())
-        tracked_files = set()
-        if self.store:
-            tracked_files = set(self.store.get_all_tracked_files())
+        tracked_files = self.get_workspace_tracked_files()
 
         all_paths = sorted(current_files | tracked_files)
         results = []
@@ -503,10 +542,17 @@ class WorkspaceManager:
 
             if self.store:
                 history = self.store.get_snapshots_for_file(path)
-                events = self.store.get_events_for_file(path)
+                events = [
+                    e for e in self.store.get_events_for_file(path)
+                    if e.data.get("workspace_path") is None or os.path.abspath(str(e.data.get("workspace_path"))) == self.workspace_path
+                ]
             else:
                 history = []
                 events = []
+
+            # If the file is not on disk and has no events in this workspace, skip it
+            if not is_on_disk and not events:
+                continue
 
             if not history:
                 status = "Untracked" if is_on_disk else "Deleted"
