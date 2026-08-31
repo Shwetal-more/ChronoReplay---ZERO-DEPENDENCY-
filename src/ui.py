@@ -95,7 +95,12 @@ class ChronoReplayUI:
         self.history_date_filter_var = tk.StringVar(value="ALL")
 
         # Initialize event engine & stores
-        self.main_db_path = database_path or os.path.abspath("chronoreplay.db")
+        self.main_db_path = database_path or os.path.join(
+            os.path.expanduser("~"),
+            ".chronoreplay",
+            "chronoreplay.db"
+            )
+        os.makedirs(os.path.dirname(self.main_db_path), exist_ok=True)
         self.store = EventStore(self.main_db_path)
         self.version_history = VersionHistory(self.store)
         self.replay_engine = ReplayEngine(self.store)
