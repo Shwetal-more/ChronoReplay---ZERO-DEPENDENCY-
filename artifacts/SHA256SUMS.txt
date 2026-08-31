@@ -1,0 +1,15 @@
+
+PS C:\WINDOWS\system32> Get-FileHash D:\ChronoReplay---ZERO-DEPENDENCY-\artifacts\relay-single -Algorithm SHA256
+
+Algorithm       Hash                                                                   Path
+---------       ----                                                                   ----
+SHA256          E7326C8B4E3BC3B03890F551541F5DAAD3A35E76A451200E380A63AFC27E3EA8       D:\ChronoReplay---ZERO-DEPEND...
+
+
+PS C:\WINDOWS\system32>
+
+PS D:\ChronoReplay---ZERO-DEPENDENCY-> Get-FileHash D:\ChronoReplay---ZERO-DEPENDENCY-\artifacts\relay-single -Algorithm SHA256
+
+Algorithm       Hash                                                                   Path    
+---------       ----                                                                   ----    
+SHA256          E7326C8B4E3BC3B03890F551541F5DAAD3A35E76A451200E380A63AFC27E3EA8       D:\Ch...
