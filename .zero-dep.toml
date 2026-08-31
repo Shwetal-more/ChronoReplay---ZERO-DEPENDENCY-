@@ -1,0 +1,13 @@
+# Zero-Dependency Challenge Track Submission Config
+[project]
+name = "ChronoReplay"
+track = "F"
+pitch = "Zero-dependency event-sourced audit, state time-machine, and workspace recovery engine built purely with Python's standard library."
+dependencies = []
+dev_dependencies = []
+
+[build]
+artifact = "artifacts/chronoreplay-single.py"
+builder = "build.py"
+standalone = true
+reproducible = true

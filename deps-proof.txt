@@ -1,30 +1,67 @@
-# ChronoReplay — Dependency Proof
+# ChronoReplay — Zero-Dependency Verification Report
 
-**Python:** 3.11.9
+**Python Version:** Python 3.10+ 
+**Third-Party Runtime Dependencies:** 0
+**Third-Party Build / Test Dependencies:** 0
 
-**Test command:**
+## 1. Automated Test Suite Execution
 
-```text
-python -m unittest discover -s tests -v
+```bash
+python3 -m unittest discover -s tests -p "test_*.py"
 ```
 
-**Result:**
-
+**Execution Output:**
 ```text
-Ran 33 tests in 0.009s
+......................................................................................................................................................
+----------------------------------------------------------------------
+Ran 150 tests in 2.694s
+
 OK
 ```
 
-**Standard-library modules currently used:**
+## 2. Standard-Library Modules Used in Shipped Code
 
 ```text
+copy
 dataclasses
 datetime
+difflib
+hashlib
 json
+os
+pathlib
+sqlite3
+sys
+time
+tkinter
+typing
 uuid
-unittest
 ```
 
-**Third-party dependencies:** 0
+## 3. Manifest Verification
+- `requirements.txt`: 0 third-party entries (empty / comment only)
+- `.zero-dep.toml`: Configured for Track F with 0 external dependencies
+- All import statements throughout `src/` and `artifacts/` use strictly Python standard library.
 
-All current project imports are Python standard-library modules.
+## 4. Standalone Single-File Reproducible Artifact & Receipt
+
+The standalone self-contained artifact `artifacts/chronoreplay-single.py` is deterministically generated from source and runs independently with 0 third-party packages.
+
+- **Artifact Path:** `artifacts/chronoreplay-single.py`
+- **Build Script:** `build.py`
+- **Reproducibility Test:** PASS (Identical SHA-256 across dual build passes)
+- **SHA-256 Checksum:** ` 739F551DE411CB063A8ED46E82CD2A9C9E941099C1917AA1DA620A61F3A1CAD9`
+
+### Verification Commands for Evaluators:
+```bash
+# 1. Verify build reproducibility
+python3 build.py
+
+# 2. Run standalone CLI self-test
+python3 artifacts/chronoreplay-single.py --cli
+
+# 3. Run entire application from single-file artifact
+python3 artifacts/chronoreplay-single.py
+```
+
+

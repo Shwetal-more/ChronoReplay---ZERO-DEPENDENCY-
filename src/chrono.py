@@ -1,13 +1,15 @@
-"""
-ChronoReplay orchestration engine.
 
-Connects:
+"""
+This file is ChronoReplay's main orchestration engine.
+It connects the following components:
 - Event creation
-- Event validation
+- Event validation  
 - Event relay
 - Event storage
 
-Only Python standard-library modules are used.
+It basically says that when user wants to create an event, chrono.py will tell event.py to create it, validator.py to validate it, store.py to store it, and relay.py to notify subscribers.
+
+By  using only Python standard-library modules, ChronoReplay ensures that it can run in any standard Python environment without requiring additional dependencies.
 """
 
 from src.event import Event
@@ -18,30 +20,31 @@ from src.relay import EventRelay
 
 class ChronoReplay:
     """
-    Main ChronoReplay engine.
-
-    This class coordinates event creation,
-    validation, storage, and notification.
+    This is class is main chronoreplay engine.
+    The event creation, validation, storage, and notification are all coordinated by this class.
+    It is the main entry point for users to interact with ChronoReplay.
     """
 
     def __init__(self, database_path="chronoreplay.db"):
         """
-        Create a ChronoReplay instance.
-
+        This creates a ChronoReplay instance automatically when a chronoreplay object is formed.
         Parameters:
             database_path:
                 Location of the SQLite database.
+                This is where the whole data of application is saved.
         """
 
-        # Persistent event storage.
+        # This creates event storage system of application.
+        # This means store the create event object inside of chronoreplay instance.
         self.store = EventStore(database_path)
 
-        # Event relay notifies subscribers.
+        # This creates event notification system of application.
         self.relay = EventRelay()
 
     def publish_event(self, event_type, data):
         """
-        Create, validate, store, and publish an event.
+        Most important function of ChronoReplay.
+        It handles the entire event creation, validation, storage, and notification process.
 
         Flow:
 
@@ -56,8 +59,8 @@ class ChronoReplay:
              Relay
         """
 
-        # Create a new Event object.
-        event = Event.create(
+        # This Create a actual Event object.
+        event = Event.create( # new object of Event class is created.
             event_type,
             data,
         )
