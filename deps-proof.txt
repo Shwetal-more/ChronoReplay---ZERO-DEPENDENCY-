@@ -50,7 +50,7 @@ The standalone self-contained artifact `artifacts/chronoreplay-single.py` is det
 - **Artifact Path:** `artifacts/chronoreplay-single.py`
 - **Build Script:** `build.py`
 - **Reproducibility Test:** PASS (Identical SHA-256 across dual build passes)
-- **SHA-256 Checksum:** ` 739F551DE411CB063A8ED46E82CD2A9C9E941099C1917AA1DA620A61F3A1CAD9`
+- **SHA-256 Checksum:** ` EC39AA9A7AA2F283CD0EE8AFC3A8AE9414AC2D087FF728E21561BB58C978E927`
 
 ### Verification Commands for Evaluators:
 ```bash

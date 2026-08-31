@@ -78,14 +78,41 @@ In traditional systems, state is stored as a mutable snapshot of the present mom
 - `src/ui.py`: Native dark-themed desktop Tkinter GUI dashboard.
 
 ---
+---
 
-## 🚀 How to Run
+## 🎮 Demo — Click and Play
+Judges can launch the actual ChronoReplay desktop GUI directly from the public GitHub repository without cloning the repository or installing any third-party Python packages.
 
-### 1. Run the Modular Application (GUI)
+Requirement: Python 3.10+ with Tkinter and an internet connection.
+
+### ⚡ 1-Click / 1-Line Instant Demo (No Git Clone Required!)
+
+Judges do not need to clone the entire repository or install any virtual environment. You can stream and execute the standalone single file directly from GitHub using Python's standard `urllib`:
+
+**Windows (PowerShell):**
+```powershell
+python -c "import urllib.request; exec(urllib.request.urlopen('https://raw.githubusercontent.com/moreshwetal417/ChronoReplay---ZERO-DEPENDENCY-/main/artifacts/chronoreplay-single.py').read().decode('utf-8'))"
+```
+
+**macOS / Linux (Bash):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/moreshwetal417/ChronoReplay---ZERO-DEPENDENCY-/main/artifacts/chronoreplay-single.py | python3
+```
+
+*(Alternatively, judges can simply download the single file [`artifacts/chronoreplay-single.py`](artifacts/chronoreplay-single.py) by right-clicking "Raw" -> "Save Link As..." and double-clicking or running `python chronoreplay-single.py` directly.)*
+
+### 🖥️ Standard Execution (Cloned Repo)
+
+#### Run via Single-File Standalone Artifact:
+```bash
+python artifacts/chronoreplay-single.py
+```
+- Launches the complete graphical desktop Tkinter application containing the full engine, simulator, time machine, and file restorer in one file.
+
+#### Run Modular Source Application:
 ```bash
 python main.py
 ```
-*(Or `python src/ui.py`)*
 
 ---
 
